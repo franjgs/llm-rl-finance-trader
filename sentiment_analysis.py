@@ -6,10 +6,37 @@ import torch
 from transformers import pipeline
 from dotenv import load_dotenv
 import finnhub
+from datetime import datetime
+import yaml
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def load_config(config_path):
+    """Load configuration from a YAML file.
+
+    Args:
+        config_path (str): Path to the YAML configuration file.
+
+    Returns:
+        dict: Parsed configuration.
+
+    Raises:
+        yaml.YAMLError: If the YAML file is invalid.
+        Exception: For other file loading errors.
+    """
+    try:
+        with open(config_path, 'r') as f:
+            content = f.read()
+            logger.info(f"YAML content:\n{content}")
+            return yaml.safe_load(content)
+    except yaml.YAMLError as e:
+        logger.error(f"YAML parsing error in {config_path}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading config {config_path}: {e}")
+        raise
 
 def setup_finnhub_client():
     """Initialize Finnhub client with API key from environment variables.
@@ -40,9 +67,14 @@ def fetch_news(finnhub_client, symbol, start_date, end_date):
         list: List of news headlines.
     """
     try:
+        # Adjust end_date to avoid future dates
+        today = datetime.now().strftime('%Y-%m-%d')
+        if end_date > today:
+            logger.warning(f"end_date {end_date} is in the future; adjusting to {today}")
+            end_date = today
         news = finnhub_client.company_news(symbol, _from=start_date, to=end_date)
-        logger.info(f"Fetched {len(news)} news articles for {symbol}")
-        return [n['headline'] for n in news]
+        logger.info(f"Fetched {len(news)} news articles for {symbol} from {start_date} to {end_date}")
+        return [n['headline'] for n in news if 'headline' in n]
     except Exception as e:
         logger.error(f"Error fetching news from Finnhub for {symbol}: {e}")
         return []
@@ -51,7 +83,7 @@ def compute_sentiment(news_texts):
     """Compute sentiment scores using FinBERT for a list of news texts.
 
     Args:
-        news_texts (list): List of news headlines.
+        news_texts (list): List of news headlines or empty strings.
 
     Returns:
         list: List of sentiment scores (positive: >0, negative: <0, neutral: ~0).
@@ -69,7 +101,7 @@ def compute_sentiment(news_texts):
         Returns:
             float: Sentiment score.
         """
-        if not text:
+        if not text or pd.isna(text):
             return 0.0
         try:
             result = sentiment_pipeline(text)[0]
@@ -85,7 +117,7 @@ def compute_sentiment(news_texts):
 
     return [get_sentiment_score(text) for text in news_texts]
 
-def process_sentiment(input_path, output_path, symbol='AAPL', start_date='2023-11-16', end_date='2024-11-10'):
+def process_sentiment(input_path, output_path, symbol, start_date, end_date):
     """Process stock data to generate static sentiment scores using Finnhub and FinBERT.
 
     Args:
@@ -98,7 +130,9 @@ def process_sentiment(input_path, output_path, symbol='AAPL', start_date='2023-1
     # Load stock data
     try:
         df = pd.read_csv(input_path)
+        df['Date'] = pd.to_datetime(df['Date'])
         logger.info(f"Loaded data from {input_path} with {len(df)} rows")
+        logger.info(f"Stock data date range: {df['Date'].min()} to {df['Date'].max()}")
     except Exception as e:
         logger.error(f"Error loading data from {input_path}: {e}")
         raise
@@ -119,12 +153,16 @@ def process_sentiment(input_path, output_path, symbol='AAPL', start_date='2023-1
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Generate static sentiment scores using Finnhub and FinBERT")
-parser.add_argument("--input", default="data/raw/AAPL.csv", help="Path to input stock data CSV")
-parser.add_argument("--output", default="data/processed/AAPL_sentiment.csv", help="Path to output CSV")
-parser.add_argument("--symbol", default="AAPL", help="Stock symbol for news fetching")
-parser.add_argument("--start", default="2023-11-16", help="Start date for news (YYYY-MM-DD)")
-parser.add_argument("--end", default="2024-11-10", help="End date for news (YYYY-MM-DD)")
+parser.add_argument("--config", default="configs/config.yaml", help="Path to config file")
 args = parser.parse_args()
 
+# Load configuration
+config = load_config(args.config)
+input_path = f"data/raw/{config['stock_symbol']}.csv"
+output_path = config['data_path']
+symbol = config['stock_symbol']
+start_date = config['start_date']
+end_date = config['end_date']
+
 # Process sentiment data
-process_sentiment(args.input, args.output, args.symbol, args.start, args.end)
+process_sentiment(input_path, output_path, symbol, start_date, end_date)
