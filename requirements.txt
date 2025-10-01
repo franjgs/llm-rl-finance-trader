@@ -10,3 +10,4 @@ pyyaml==6.0.2
 ipykernel
 ipywidgets
 matplotlib
+finnhub-python==2.4.20
