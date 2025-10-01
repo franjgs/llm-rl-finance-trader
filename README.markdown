@@ -54,14 +54,14 @@ This project implements a trading environment (`TradingEnv`) that uses historica
    torch==2.4.1
    transformers==4.45.1
    pandas==2.2.3
-   yfinance
-   pandas-datareader
+   yfinance==0.2.48
+   pandas-datareader==0.10.0
    python-dotenv==1.0.1
    pyyaml==6.0.2
-   ipykernel
-   ipywidgets
-   matplotlib
-   finnhub-python
+   ipykernel==6.29.5
+   ipywidgets==8.1.5
+   matplotlib==3.9.2
+   finnhub-python==2.4.20
    ```
 
 4. **Configure API Keys**:
@@ -75,24 +75,24 @@ This project implements a trading environment (`TradingEnv`) that uses historica
 1. **Fetch Stock Data**:
    Downloads AAPL data from Stooq and saves to `data/raw/AAPL.csv`.
    ```bash
-   python src/data_fetch.py --stock AAPL --start 2023-11-16 --end 2024-11-10
+   python data_fetch.py --stock AAPL --start 2023-11-16 --end 2024-11-10
    ```
 
 2. **Process Sentiment**:
    Fetches news from Finnhub, applies FinBERT sentiment analysis, and saves to `data/processed/AAPL_sentiment.csv`.
    ```bash
-   python src/sentiment_analysis.py --input data/raw/AAPL.csv --output data/processed/AAPL_sentiment.csv
+   python sentiment_analysis.py --input data/raw/AAPL.csv --output data/processed/AAPL_sentiment.csv
    ```
    In Spyder:
-   - Open `src/sentiment_analysis.py`, set the working directory to the project root (`os.chdir('/path/to/llm-rl-finance-trader')`), and run.
+   - Open `sentiment_analysis.py`, set the working directory to the project root (`os.chdir('/path/to/llm-rl-finance-trader')`), and run.
 
 3. **Train PPO Model**:
    Trains the RL model and saves to `models/trading_model`. Generates a plot in `results/aapl_trading_results.png`. Variables (`df`, `model`, `net_worth`, `actions`) are inspectable in Spyder.
    ```bash
-   python src/train_model.py --config configs/config.yaml
+   python train_model.py --config configs/config.yaml
    ```
    In Spyder:
-   - Open `src/train_model.py`, set the working directory, and run line by line or the entire script to inspect variables in Variable Explorer.
+   - Open `train_model.py`, set the working directory, and run line by line or the entire script to inspect variables in Variable Explorer.
 
 4. **Visualize Results**:
    View the price and trading results plot:
@@ -111,12 +111,12 @@ llm-rl-finance-trader/
 ├── models/                 # Trained models
 ├── results/                # Visualizations (e.g., aapl_trading_results.png)
 ├── src/
-│   ├── data_fetch.py       # Fetch stock data
-│   ├── sentiment_analysis.py  # Fetch news and apply sentiment analysis
-│   ├── train_model.py      # Train RL model
 │   └── trading_env.py      # Custom Gym environment
 ├── notebooks/
 │   └── quick_start.ipynb   # Interactive analysis
+├── data_fetch.py           # Fetch stock data
+├── sentiment_analysis.py   # Fetch news and apply sentiment analysis
+├── train_model.py         # Train RL model
 ├── requirements.txt        # Dependencies
 ├── .env                    # API keys (not tracked)
 ├── .gitignore             # Git ignore file
