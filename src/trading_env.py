@@ -4,25 +4,28 @@ import pandas as pd
 from gymnasium import spaces
 
 class TradingEnv(gym.Env):
-    """Custom Gym environment for stock trading with sentiment data."""
+    """Custom Gym environment for stock trading with optional sentiment data."""
     
-    def __init__(self, df):
+    def __init__(self, df, use_sentiment=True):
         """Initialize the trading environment.
 
         Args:
             df (pd.DataFrame): DataFrame with stock data (open, high, low, close, volume, sentiment).
+            use_sentiment (bool): Whether to include sentiment in the observation space.
         """
         super(TradingEnv, self).__init__()
         # Clean and reset DataFrame index
         self.df = df.dropna().reset_index(drop=True)
+        self.use_sentiment = use_sentiment
         self.current_step = 0
         self.balance = 10000  # Initial balance
         self.shares_held = 0  # Initial shares held
         self.max_steps = len(self.df)  # Set max_steps to DataFrame length
 
-        # Define observation space (6 features: open, high, low, close, volume, sentiment)
+        # Define observation space (5 or 6 features depending on use_sentiment)
+        obs_shape = 6 if self.use_sentiment else 5
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(obs_shape,), dtype=np.float32
         )
         # Define action space (0: hold, 1: buy, 2: sell)
         self.action_space = spaces.Discrete(3)
@@ -47,22 +50,23 @@ class TradingEnv(gym.Env):
         """Get the current observation from stock data.
 
         Returns:
-            np.array: Array with [open, high, low, close, volume, sentiment].
+            np.array: Array with [open, high, low, close, volume, (sentiment)].
         """
         # Handle out-of-bounds steps
         if self.current_step >= len(self.df):
             row = self.df.iloc[-1]
         else:
             row = self.df.iloc[self.current_step]
-        obs = np.array([
+        obs = [
             row['open'],
             row['high'],
             row['low'],
             row['close'],
-            row['volume'],
-            row['sentiment']
-        ], dtype=np.float32)
-        return obs
+            row['volume']
+        ]
+        if self.use_sentiment:
+            obs.append(row['sentiment'])
+        return np.array(obs, dtype=np.float32)
 
     def step(self, action):
         """Execute one step in the environment.
