@@ -34,4 +34,4 @@ conda-bld/
 *.swo
 .vscode/
 .idea/
-.venv
+.env
