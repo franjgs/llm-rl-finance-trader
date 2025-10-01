@@ -5,21 +5,28 @@
 ![License](https://img.shields.io/badge/license-MIT-brightgreen.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
 
-A Reinforcement Learning (RL) and Large Language Model (LLM)-based trading system inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2310.03080). This project uses stock price data (e.g., AAPL) and sentiment analysis (via Finnhub and FinBERT) to train a PPO model for trading decisions. Built with Python 3.10, Gymnasium, Stable-Baselines3, and PyTorch with MPS acceleration on Apple M3 Pro.
+A hybrid trading system combining Large Language Models (LLM) for static financial news sentiment analysis and Reinforcement Learning (RL) for dynamic trading strategy optimization. Inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059). Built with Python 3.10, Gymnasium, Stable-Baselines3, and PyTorch with MPS acceleration on Apple M3 Pro.
 
 ## Table of Contents
 - [Overview](#overview)
+- [Architecture](#architecture)
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Project Structure](#project-structure)
-- [Troubleshooting](#troubleshooting)
 - [Future Improvements](#future-improvements)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Overview
-This project implements a trading environment (`TradingEnv`) that uses historical stock data and sentiment scores to train a PPO agent for portfolio management. The pipeline fetches stock data (e.g., AAPL from 2023-11-16 to 2024-11-10), fetches news and applies sentiment analysis using Finnhub and FinBERT, and trains an RL model to optimize trading strategies. The goal is to replicate the paper’s results (e.g., $14K vs. $11K for multi-stock portfolios) with a focus on single-stock (AAPL) for now.
+This project implements a hybrid trading system where a Large Language Model (FinBERT) processes financial news from Finnhub to generate static sentiment scores, which are then used by a Reinforcement Learning agent (PPO) in a custom `TradingEnv` to dynamically optimize trading decisions. The pipeline fetches stock data (e.g., AAPL from 2023-11-16 to 2024-11-10), generates sentiment scores, and trains the RL model to maximize portfolio value, aiming to replicate the paper’s results (e.g., $14K vs. $11K for multi-stock portfolios) with a focus on single-stock (AAPL) for now.
+
+## Architecture
+The system follows a hybrid LLM + RL architecture:
+- **Static LLM Component**: FinBERT processes financial news from Finnhub to generate sentiment scores, providing a static input that captures market sentiment for each trading day.
+- **Dynamic RL Component**: A PPO agent uses the sentiment scores alongside stock price data (open, high, low, close, volume) in a custom `TradingEnv` to make dynamic trading decisions (buy, sell, hold).
+
+This separation ensures that the LLM handles static analysis of textual data, while the RL agent adapts dynamically to market conditions.
 
 ## Features
 - **Data Fetching**: Downloads historical stock data using `pandas_datareader` (Stooq) with fallback to `yfinance`.
@@ -123,43 +130,12 @@ llm-rl-finance-trader/
 └── README.md              # Project documentation
 ```
 
-## Troubleshooting
-- **YFinance Errors**: If `data_fetch.py` fails with `YFTzMissingError`, it falls back to `pandas_datareader` (Stooq). Manually download from [Yahoo Finance](https://finance.yahoo.com/quote/AAPL/history) if needed.
-- **FileNotFoundError**: Ensure `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` exist. Set the working directory to the project root in Spyder (Tools > Current working directory).
-- **TqdmWarning**: Install `ipywidgets`:
-  ```bash
-  pip install ipywidgets
-  ```
-- **ModuleNotFoundError: No module named 'gym'**: Use `import gymnasium as gym` in `trading_env.py` and ensure `gymnasium==0.29.1` is installed.
-- **ValueError in TradingEnv**: Ensure `observation_space` matches `AAPL_sentiment.csv` columns (`open,high,low,close,volume,sentiment`).
-- **Sentiment Scores Always 0**: Ensure Finnhub API key is set in `.env` and FinBERT processes news correctly. Test with:
-  ```python
-  from transformers import pipeline
-  import finnhub
-  from dotenv import load_dotenv
-  import os
-  load_dotenv()
-  finnhub_client = finnhub.Client(api_key=os.getenv('FINNHUB_API_KEY'))
-  news = finnhub_client.company_news('AAPL', _from="2023-11-16", to="2024-11-10")
-  sentiment_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=0 if torch.backends.mps.is_available() else -1)
-  print(sentiment_pipeline(news[0]['headline'])[0])
-  ```
-  If `neutral` or `0`, verify the news text and `get_sentiment_score` logic in `sentiment_analysis.py`.
-- **MPS Acceleration**: Verify MPS with:
-  ```python
-  import torch
-  print(torch.backends.mps.is_available())  # Should be True
-  ```
-  If `False`, reinstall PyTorch:
-  ```bash
-  conda install pytorch==2.4.1 -c pytorch
-  ```
-
 ## Future Improvements
-- **Multi-Stock Portfolio**: Extend `TradingEnv` for stocks like LEXCX to replicate the paper’s $14K vs. $11K results.
-- **Backtesting**: Use `backtrader` for metrics like Sharpe ratio.
-- **Advanced Visualizations**: Add plots for cumulative returns and action frequency.
-- **Real-Time Sentiment**: Integrate X API for real-time news sentiment analysis.
+- **Enhanced LLM Preprocessing**: Use more advanced LLMs (e.g., BERT variants or GPT-based models) to extract richer features from news, such as sentiment intensity or event relevance, to improve static inputs for RL.
+- **Dynamic RL Strategies**: Implement advanced RL algorithms (e.g., SAC or DDPG) to handle continuous action spaces and improve trading decision robustness.
+- **Hybrid Integration**: Develop a feedback loop where RL decisions influence LLM input selection (e.g., prioritizing news based on market volatility).
+- **Multi-Stock Portfolio**: Extend `TradingEnv` to handle multiple stocks (e.g., LEXCX) with LLM-derived sentiment scores for each, replicating the paper’s $14K vs. $11K results.
+- **Backtesting with Hybrid Metrics**: Use `backtrader` to evaluate combined LLM+RL performance with metrics like Sharpe ratio, incorporating sentiment impact.
 
 ## Contributing
 Contributions are welcome! Please:
