@@ -3,7 +3,10 @@ stable-baselines3==2.3.2
 torch==2.4.1
 transformers==4.45.1
 pandas==2.2.3
-yfinance==0.2.44
+yfinance
+pandas-datareader
 python-dotenv==1.0.1
 pyyaml==6.0.2
-# Opcional: streamlit para dashboard
+ipykernel
+ipywidgets
+matplotlib
