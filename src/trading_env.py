@@ -4,20 +4,39 @@ import pandas as pd
 from gymnasium import spaces
 
 class TradingEnv(gym.Env):
+    """Custom Gym environment for stock trading with sentiment data."""
+    
     def __init__(self, df):
+        """Initialize the trading environment.
+
+        Args:
+            df (pd.DataFrame): DataFrame with stock data (open, high, low, close, volume, sentiment).
+        """
         super(TradingEnv, self).__init__()
+        # Clean and reset DataFrame index
         self.df = df.dropna().reset_index(drop=True)
         self.current_step = 0
-        self.balance = 10000
-        self.shares_held = 0
-        self.max_steps = len(self.df)  # Mantener max_steps = len(self.df)
+        self.balance = 10000  # Initial balance
+        self.shares_held = 0  # Initial shares held
+        self.max_steps = len(self.df)  # Set max_steps to DataFrame length
 
+        # Define observation space (6 features: open, high, low, close, volume, sentiment)
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32
         )
+        # Define action space (0: hold, 1: buy, 2: sell)
         self.action_space = spaces.Discrete(3)
 
     def reset(self, seed=None, options=None):
+        """Reset the environment to initial state.
+
+        Args:
+            seed (int, optional): Random seed for reproducibility.
+            options (dict, optional): Additional reset options.
+
+        Returns:
+            tuple: Initial observation and info dictionary.
+        """
         super().reset(seed=seed)
         self.current_step = 0
         self.balance = 10000
@@ -25,9 +44,13 @@ class TradingEnv(gym.Env):
         return self._get_observation(), {}
 
     def _get_observation(self):
-        # Evitar acceso fuera de límites
+        """Get the current observation from stock data.
+
+        Returns:
+            np.array: Array with [open, high, low, close, volume, sentiment].
+        """
+        # Handle out-of-bounds steps
         if self.current_step >= len(self.df):
-            # Devolver la última observación disponible
             row = self.df.iloc[-1]
         else:
             row = self.df.iloc[self.current_step]
@@ -42,6 +65,15 @@ class TradingEnv(gym.Env):
         return obs
 
     def step(self, action):
+        """Execute one step in the environment.
+
+        Args:
+            action (int): Action to take (0: hold, 1: buy, 2: sell).
+
+        Returns:
+            tuple: (observation, reward, done, truncated, info).
+        """
+        # Get current price
         current_price = self.df.iloc[min(self.current_step, len(self.df) - 1)]['close']
         reward = 0
         if action == 1:  # Buy
@@ -59,4 +91,5 @@ class TradingEnv(gym.Env):
         return self._get_observation(), reward, done, truncated, {}
 
     def render(self):
+        """Render the environment (not implemented)."""
         pass

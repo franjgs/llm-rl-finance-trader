@@ -48,6 +48,18 @@ def plot_results(df, net_worth, actions):
         net_worth (list): List of portfolio net worth values.
         actions (list): List of trading actions (0: hold, 1: buy, 2: sell).
     """
+    # Ensure lengths match
+    min_length = min(len(df['Date']), len(net_worth), len(actions))
+    if min_length < len(df['Date']):
+        logger.warning(f"Truncating df['Date'] from {len(df['Date'])} to {min_length} to match net_worth and actions")
+        df = df.iloc[:min_length]
+    if min_length < len(net_worth):
+        logger.warning(f"Truncating net_worth from {len(net_worth)} to {min_length}")
+        net_worth = net_worth[:min_length]
+    if min_length < len(actions):
+        logger.warning(f"Truncating actions from {len(actions)} to {min_length}")
+        actions = actions[:min_length]
+
     # Convert 'Date' to datetime to avoid Matplotlib warnings
     df['Date'] = pd.to_datetime(df['Date'])
     
@@ -151,6 +163,9 @@ while not done:
     actions.append(action)
     # Log simulation step details
     logger.debug(f"Step {env.current_step}: action={action}, balance={env.balance}, shares_held={env.shares_held}, current_price={current_price}, net_worth={net_worth_value}")
+    # Stop early if max_steps reached
+    if env.current_step >= len(df) - 1:
+        done = True
 
 # Log data lengths
 logger.info(f"Length of df['Date']: {len(df['Date'])}, Length of net_worth: {len(net_worth)}, Length of actions: {len(actions)}")
