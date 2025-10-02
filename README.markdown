@@ -1,6 +1,6 @@
 # 📈 LLM-RL Finance Trader
 
-![Python](https://img.shields.io/badge/Python-3.10-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
 ![Conda](https://img.shields.io/badge/Conda-llm_rl_finance-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Status](https://img.shields.io/badge/Status-In%20Progress-orange.svg)
@@ -25,7 +25,7 @@ This repository is part of a TFG (Trabajo de Fin de Grado) and is designed to be
 ## 📋 Prerequisites
 
 - **OS**: macOS (optimized for Apple M3 Pro with MPS support)
-- **Python**: 3.10
+- **Python**: 3.11
 - **Conda**: Environment `llm_rl_finance`
 - **External API**: Finnhub API key (stored in `.env`)
 
@@ -41,7 +41,7 @@ This repository is part of a TFG (Trabajo de Fin de Grado) and is designed to be
 
 2. **Set Up Conda Environment**:
    ```bash
-   conda create -n llm_rl_finance python=3.10
+   conda create -n llm_rl_finance python=3.11
    conda activate llm_rl_finance
    ```
 
@@ -190,9 +190,5 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ## 🙌 Acknowledgments
 
 - Inspired by ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059).
-- Built with ❤️ for a TFG in Machine Learning and Finance.
-- Thanks to [Finnhub](https://finnhub.io/) and [Hugging Face](https://huggingface.co/) for APIs and models.
-
----
-
-*Happy trading! 🚀 Questions or contributions? Open an issue or PR on GitHub!*
+- Built for a TFG in Machine Learning and Finance.
+- Revise [Finnhub](https://finnhub.io/) and [Hugging Face](https://huggingface.co/) for APIs and models.
