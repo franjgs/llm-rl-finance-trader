@@ -159,7 +159,7 @@ Key metrics (from logs):
   - Inspect `src/trading_env.py` to ensure `max_steps = len(df)`.
 
 - **Data Misalignment**:
-  - Verify that `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` have 247 rows:
+  - Verify that `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` have the same length:
     ```python
     import pandas as pd
     df_raw = pd.read_csv('data/raw/AAPL.csv')
