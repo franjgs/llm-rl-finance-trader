@@ -146,6 +146,13 @@ def process_sentiment(input_path, output_path, symbol, start_date, end_date):
     df['sentiment'] = compute_sentiment(df['news'])
     logger.info(f"Computed sentiment for {len(df)} rows")
 
+    # Verify date alignment
+    expected_dates = pd.date_range(start=start_date, end=end_date, freq='B')
+    missing_dates = expected_dates.difference(df['Date'])
+    if len(missing_dates) > 0:
+        logger.warning(f"Missing {len(missing_dates)} dates in stock data: {missing_dates}")
+    logger.info(f"Output DataFrame columns: {df.columns.tolist()}")
+
     # Save output
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False)
