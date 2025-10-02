@@ -144,8 +144,8 @@ The project compares two RL trading strategies for AAPL (16/11/2023 - 10/11/2024
 - **Without Sentiment**: Relies solely on price and volume data.
 
 Key metrics (from logs):
-- **Sharpe Ratio (With Sentiment)**: 0.8666
-- **Sharpe Ratio (Without Sentiment)**: -0.0899
+- **Sharpe Ratio (With Sentiment)**: 0.6627
+- **Sharpe Ratio (Without Sentiment)**: 0.2501
 - **Output Plot**: Visualizes stock prices, buy/sell actions, and portfolio net worth.
 
 ![Trading Results](results/aapl_trading_results_comparison.png)
@@ -159,7 +159,7 @@ Key metrics (from logs):
   - Inspect `src/trading_env.py` to ensure `max_steps = len(df)`.
 
 - **Data Misalignment**:
-  - Verify that `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` have 247 rows:
+  - Verify that `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` have the same length:
     ```python
     import pandas as pd
     df_raw = pd.read_csv('data/raw/AAPL.csv')
