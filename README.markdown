@@ -1,6 +1,6 @@
 # 📈 LLM-RL Finance Trader
 
-![Python](https://img.shields.io/badge/Python-3.10-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
 ![Conda](https://img.shields.io/badge/Conda-llm_rl_finance-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Status](https://img.shields.io/badge/Status-In%20Progress-orange.svg)
