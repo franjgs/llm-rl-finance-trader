@@ -1,10 +1,10 @@
-import argparse
-import pandas as pd
 import yfinance as yf
-import logging
+import pandas as pd
+import argparse
 import yaml
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -25,9 +25,7 @@ def load_config(config_path):
     """
     try:
         with open(config_path, 'r') as f:
-            content = f.read()
-            logger.info(f"YAML content:\n{content}")
-            return yaml.safe_load(content)
+            return yaml.safe_load(f)
     except yaml.YAMLError as e:
         logger.error(f"YAML parsing error in {config_path}: {e}")
         raise
@@ -35,38 +33,34 @@ def load_config(config_path):
         logger.error(f"Error loading config {config_path}: {e}")
         raise
 
-def fetch_stock_data(symbol, start_date, end_date, output_path):
-    """Fetch stock data using yfinance and save to CSV.
+def fetch_stock_data(symbol, start_date, end_date):
+    """Fetch historical stock data using yfinance.
 
     Args:
-        symbol (str): Stock symbol (e.g., 'AAPL').
-        start_date (str): Start date (YYYY-MM-DD).
-        end_date (str): End date (YYYY-MM-DD).
-        output_path (str): Path to save the CSV file.
+        symbol (str): Stock ticker symbol (e.g., 'AAPL').
+        start_date (str): Start date in YYYY-MM-DD format.
+        end_date (str): End date in YYYY-MM-DD format.
+
+    Returns:
+        pd.DataFrame: Stock data with Date, open, high, low, close, volume.
+
+    Raises:
+        Exception: If data fetching fails.
     """
     try:
-        # Adjust end_date to avoid future dates
-        today = datetime.now().strftime('%Y-%m-%d')
-        if end_date > today:
-            logger.warning(f"end_date {end_date} is in the future; adjusting to {today}")
-            end_date = today
-        # Download data
-        df = yf.download(symbol, start=start_date, end=end_date, progress=False)
+        # Extend end_date by one day to ensure inclusion
+        end_date_dt = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+        stock = yf.Ticker(symbol)
+        df = stock.history(start=start_date, end=end_date_dt.strftime('%Y-%m-%d'))
         if df.empty:
             logger.error(f"No data retrieved for {symbol} from {start_date} to {end_date}")
-            raise ValueError("Empty DataFrame")
-        # Reset index to have Date as a column
+            raise ValueError("No data retrieved from yfinance")
         df = df.reset_index()
         df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
         df.columns = ['Date', 'open', 'high', 'low', 'close', 'volume']
-        df['Date'] = pd.to_datetime(df['Date'])
+        df['Date'] = pd.to_datetime(df['Date']).dt.date
         logger.info(f"Fetched {len(df)} rows for {symbol} from {start_date} to {end_date}")
-        logger.info(f"Stock data date range: {df['Date'].min()} to {df['Date'].max()}")
-        
-        # Save to CSV
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        df.to_csv(output_path, index=False)
-        logger.info(f"Saved stock data to {output_path}")
+        return df
     except Exception as e:
         logger.error(f"Error fetching data for {symbol}: {e}")
         raise
@@ -78,10 +72,13 @@ args = parser.parse_args()
 
 # Load configuration
 config = load_config(args.config)
-symbol = config['stock_symbol']
-start_date = config['start_date']
-end_date = config['end_date']
-output_path = f"data/raw/{symbol}.csv"
+logger.info(f"Loaded config: {config}")
 
-# Fetch and save stock data
-fetch_stock_data(symbol, start_date, end_date, output_path)
+# Fetch stock data
+df = fetch_stock_data(config['stock_symbol'], config['start_date'], config['end_date'])
+
+# Save data
+os.makedirs('data/raw', exist_ok=True)
+output_path = f"data/raw/{config['stock_symbol']}.csv"
+df.to_csv(output_path, index=False)
+logger.info(f"Saved stock data to {output_path}")

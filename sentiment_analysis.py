@@ -6,7 +6,7 @@ import torch
 from transformers import pipeline
 from dotenv import load_dotenv
 import finnhub
-from datetime import datetime
+from datetime import datetime, timedelta
 import yaml
 
 # Configure logging
