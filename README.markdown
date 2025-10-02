@@ -144,8 +144,8 @@ The project compares two RL trading strategies for AAPL (16/11/2023 - 10/11/2024
 - **Without Sentiment**: Relies solely on price and volume data.
 
 Key metrics (from logs):
-- **Sharpe Ratio (With Sentiment)**: 0.8666
-- **Sharpe Ratio (Without Sentiment)**: -0.0899
+- **Sharpe Ratio (With Sentiment)**: 0.6627
+- **Sharpe Ratio (Without Sentiment)**: 0.2501
 - **Output Plot**: Visualizes stock prices, buy/sell actions, and portfolio net worth.
 
 ![Trading Results](results/aapl_trading_results_comparison.png)
