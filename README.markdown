@@ -1,49 +1,45 @@
-# LLM-RL-Finance-Trader
+# 📈 LLM-RL Finance Trader
 
-![Python](https://img.shields.io/badge/python-3.10-blue.svg)
-![Conda](https://img.shields.io/badge/conda-llm_rl_finance-green.svg)
-![License](https://img.shields.io/badge/license-MIT-brightgreen.svg)
-![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
+![Python](https://img.shields.io/badge/Python-3.10-blue.svg)
+![Conda](https://img.shields.io/badge/Conda-llm_rl_finance-green.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Status](https://img.shields.io/badge/Status-In%20Progress-orange.svg)
 
-A hybrid trading system combining Large Language Models (LLM) for static financial news sentiment analysis and Reinforcement Learning (RL) for dynamic trading strategy optimization. Inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059). Built with Python 3.10, Gymnasium, Stable-Baselines3, and PyTorch with MPS acceleration on Apple M3 Pro.
+Welcome to **LLM-RL Finance Trader**, a cutting-edge project that combines **Reinforcement Learning (RL)** with **Large Language Models (LLM)** to enhance stock trading strategies using financial news sentiment analysis. Inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059), this project implements a PPO-based RL agent to trade stocks (e.g., AAPL) with and without sentiment data, comparing their performance using metrics like Sharpe Ratio.
 
-## Table of Contents
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Future Improvements](#future-improvements)
-- [Contributing](#contributing)
-- [License](#license)
+This repository is part of a TFG (Trabajo de Fin de Grado) and is designed to be reproducible, portable, and optimized for macOS (Apple M3 Pro with MPS support) using a Conda environment (`llm_rl_finance`).
 
-## Overview
-This project implements a hybrid trading system where a Large Language Model (FinBERT) processes financial news from Finnhub to generate static sentiment scores, which are then used by a Reinforcement Learning agent (PPO) in a custom `TradingEnv` to dynamically optimize trading decisions. The pipeline fetches stock data (e.g., AAPL from 2023-11-16 to 2024-11-10), generates sentiment scores, and trains the RL model to maximize portfolio value, aiming to replicate the paper’s results (e.g., $14K vs. $11K for multi-stock portfolios) with a focus on single-stock (AAPL) for now.
+---
 
-## Architecture
-The system follows a hybrid LLM + RL architecture:
-- **Static LLM Component**: FinBERT processes financial news from Finnhub to generate sentiment scores, providing a static input that captures market sentiment for each trading day.
-- **Dynamic RL Component**: A PPO agent uses the sentiment scores alongside stock price data (open, high, low, close, volume) in a custom `TradingEnv` to make dynamic trading decisions (buy, sell, hold).
+## 🚀 Features
 
-This separation ensures that the LLM handles static analysis of textual data, while the RL agent adapts dynamically to market conditions.
+- **Data Fetching**: Downloads historical stock data (e.g., AAPL) using `yfinance`.
+- **Sentiment Analysis**: Integrates financial news from Finnhub and computes sentiment scores using FinBERT.
+- **RL Trading**: Trains a PPO model with Stable-Baselines3 to trade stocks, with optional sentiment integration.
+- **Performance Evaluation**: Compares trading strategies (with/without sentiment) using net worth and Sharpe Ratio.
+- **Visualization**: Generates plots of stock prices, trading actions, and portfolio net worth.
+- **Reproducible Workflow**: Uses relative paths and Conda for portability, with detailed logging for debugging.
 
-## Features
-- **Data Fetching**: Downloads historical stock data using `pandas_datareader` (Stooq) with fallback to `yfinance`.
-- **Sentiment Analysis**: Fetches financial news from Finnhub and processes sentiment with FinBERT.
-- **RL Training**: Trains a PPO model using `stable-baselines3` in a custom `TradingEnv`.
-- **Visualization**: Generates plots of stock prices, trading actions (buy/sell), and portfolio net worth (`results/aapl_trading_results.png`).
-- **MPS Acceleration**: Optimized for Apple M3 Pro with PyTorch MPS support.
-- **Spyder Support**: `train_model.py` runs inline for variable inspection in Spyder’s Variable Explorer.
+---
 
-## Installation
+## 📋 Prerequisites
+
+- **OS**: macOS (optimized for Apple M3 Pro with MPS support)
+- **Python**: 3.10
+- **Conda**: Environment `llm_rl_finance`
+- **External API**: Finnhub API key (stored in `.env`)
+
+---
+
+## 🛠️ Installation
+
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/franjgs/llm-rl-finance-trader.git
+   git clone https://github.com/your-username/llm-rl-finance-trader.git
    cd llm-rl-finance-trader
    ```
 
-2. **Create Conda Environment**:
+2. **Set Up Conda Environment**:
    ```bash
    conda create -n llm_rl_finance python=3.10
    conda activate llm_rl_finance
@@ -53,99 +49,150 @@ This separation ensures that the LLM handles static analysis of textual data, wh
    ```bash
    pip install -r requirements.txt
    ```
-
-   `requirements.txt`:
+   Ensure `requirements.txt` includes:
    ```
-   gymnasium==0.29.1
-   stable-baselines3==2.3.2
-   torch==2.4.1
-   transformers==4.45.1
-   pandas==2.2.3
-   yfinance==0.2.48
-   pandas-datareader==0.10.0
-   python-dotenv==1.0.1
-   pyyaml==6.0.2
-   ipykernel==6.29.5
-   ipywidgets==8.1.5
-   matplotlib==3.9.2
-   finnhub-python==2.4.20
+   pandas
+   numpy
+   matplotlib
+   torch
+   stable-baselines3
+   gymnasium
+   yfinance
+   finnhub-python
+   transformers
+   python-dotenv
+   pyyaml
    ```
 
-4. **Configure API Keys**:
-   - Create a `.env` file in the project root.
-   - Add your Finnhub API key (obtain from https://finnhub.io/register):
+4. **Set Up Finnhub API Key**:
+   - Create a `.env` file in the project root:
+     ```bash
+     echo "FINNHUB_API_KEY=your_api_key" > .env
      ```
-     FINNHUB_API_KEY=your_api_key_here
-     ```
+   - Obtain your API key from [Finnhub](https://finnhub.io/).
 
-## Usage
-1. **Fetch Stock Data**:
-   Downloads AAPL data from Stooq and saves to `data/raw/AAPL.csv`.
-   ```bash
-   python data_fetch.py --stock AAPL --start 2023-11-16 --end 2024-11-10
-   ```
+---
 
-2. **Process Sentiment**:
-   Fetches news from Finnhub, applies FinBERT sentiment analysis, and saves to `data/processed/AAPL_sentiment.csv`.
-   ```bash
-   python sentiment_analysis.py --input data/raw/AAPL.csv --output data/processed/AAPL_sentiment.csv
-   ```
-   In Spyder:
-   - Open `sentiment_analysis.py`, set the working directory to the project root (`os.chdir('/path/to/llm-rl-finance-trader')`), and run.
+## 📂 Project Structure
 
-3. **Train PPO Model**:
-   Trains the RL model and saves to `models/trading_model`. Generates a plot in `results/aapl_trading_results.png`. Variables (`df`, `model`, `net_worth`, `actions`) are inspectable in Spyder.
-   ```bash
-   python train_model.py --config configs/config.yaml
-   ```
-   In Spyder:
-   - Open `train_model.py`, set the working directory, and run line by line or the entire script to inspect variables in Variable Explorer.
-
-4. **Visualize Results**:
-   View the price and trading results plot:
-   ```bash
-   open results/aapl_trading_results.png
-   ```
-
-## Project Structure
 ```
 llm-rl-finance-trader/
-├── configs/
-│   └── config.yaml          # Configuration file
-├── data/
-│   ├── raw/                # Raw stock data (e.g., AAPL.csv)
-│   └── processed/          # Data with sentiment (e.g., AAPL_sentiment.csv)
-├── models/                 # Trained models
-├── results/                # Visualizations (e.g., aapl_trading_results.png)
-├── src/
-│   └── trading_env.py      # Custom Gym environment
-├── notebooks/
-│   └── quick_start.ipynb   # Interactive analysis
-├── data_fetch.py           # Fetch stock data
-├── sentiment_analysis.py   # Fetch news and apply sentiment analysis
-├── train_model.py         # Train RL model
-├── requirements.txt        # Dependencies
-├── .env                    # API keys (not tracked)
-├── .gitignore             # Git ignore file
-└── README.md              # Project documentation
+├── configs/                    # Configuration files
+│   └── config.yaml             # Project settings (stock symbol, dates, etc.)
+├── data/                       # Data storage
+│   ├── raw/                    # Raw stock data (e.g., AAPL.csv)
+│   └── processed/              # Processed data with sentiment (e.g., AAPL_sentiment.csv)
+├── models/                     # Trained RL models
+├── results/                    # Output plots and results
+├── src/                        # Auxiliary modules
+│   └── trading_env.py           # Custom Gym environment for trading
+├── data_fetch.py               # Fetches stock data
+├── sentiment_analysis.py       # Computes sentiment from financial news
+├── train_model.py              # Trains and evaluates RL trading model
+├── .env                        # Environment variables (Finnhub API key)
+├── requirements.txt            # Python dependencies
+└── README.md                   # Project documentation
 ```
 
-## Future Improvements
-- **Enhanced LLM Preprocessing**: Use more advanced LLMs (e.g., BERT variants or GPT-based models) to extract richer features from news, such as sentiment intensity or event relevance, to improve static inputs for RL.
-- **Dynamic RL Strategies**: Implement advanced RL algorithms (e.g., SAC or DDPG) to handle continuous action spaces and improve trading decision robustness.
-- **Hybrid Integration**: Develop a feedback loop where RL decisions influence LLM input selection (e.g., prioritizing news based on market volatility).
-- **Multi-Stock Portfolio**: Extend `TradingEnv` to handle multiple stocks (e.g., LEXCX) with LLM-derived sentiment scores for each, replicating the paper’s $14K vs. $11K results.
-- **Backtesting with Hybrid Metrics**: Use `backtrader` to evaluate combined LLM+RL performance with metrics like Sharpe ratio, incorporating sentiment impact.
+---
 
-## Contributing
-Contributions are welcome! Please:
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/YourFeature`).
-3. Commit changes (`git commit -m 'Add YourFeature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Open a pull request.
+## 🖥️ Usage
 
-Please ensure code follows PEP 8 and includes English docstrings/comments.
+1. **Configure the Project**:
+   Edit `configs/config.yaml`:
+   ```yaml
+   stock_symbol: AAPL
+   start_date: 2023-11-16
+   end_date: 2024-11-08
+   data_path: data/processed/AAPL_sentiment.csv
+   timesteps: 10000
+   ```
 
-## License
+2. **Run the Pipeline**:
+   ```bash
+   conda activate llm_rl_finance
+   python data_fetch.py --config configs/config.yaml
+   python sentiment_analysis.py --config configs/config.yaml
+   python train_model.py --config configs/config.yaml
+   ```
+
+3. **Check Outputs**:
+   - **Data**: `data/processed/AAPL_sentiment.csv` (stock data with sentiment)
+   - **Models**: `models/trading_model_with_sentiment.zip`, `models/trading_model_without_sentiment.zip`
+   - **Results**: `results/aapl_trading_results.csv` (trading performance)
+   - **Plots**: `results/aapl_trading_results_comparison.png` (visualization of prices and net worth)
+
+4. **Debugging**:
+   - Check logs for errors or missing dates:
+     ```bash
+     cat logs/train_model.log | grep "Missing dates"
+     ```
+   - Verify data alignment:
+     ```python
+     import pandas as pd
+     df = pd.read_csv('data/processed/AAPL_sentiment.csv')
+     results_df = pd.read_csv('results/aapl_trading_results.csv')
+     print(df['Date'].equals(results_df['Date']))
+     ```
+
+---
+
+## 📊 Results
+
+The project compares two RL trading strategies for AAPL (16/11/2023 - 10/11/2024):
+- **With Sentiment**: Uses FinBERT sentiment scores from financial news.
+- **Without Sentiment**: Relies solely on price and volume data.
+
+Key metrics (from logs):
+- **Sharpe Ratio (With Sentiment)**: 0.8666
+- **Sharpe Ratio (Without Sentiment)**: -0.0899
+- **Output Plot**: Visualizes stock prices, buy/sell actions, and portfolio net worth.
+
+![Trading Results](results/aapl_trading_results_comparison.png)
+
+---
+
+## 🐛 Troubleshooting
+
+- **Simulation Stops Early**:
+  - Check logs for `Simulation (with sentiment) stopped early at step X, date=Y. Missing dates: [...]`.
+  - Inspect `src/trading_env.py` to ensure `max_steps = len(df)`.
+
+- **Data Misalignment**:
+  - Verify that `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` have 247 rows:
+    ```python
+    import pandas as pd
+    df_raw = pd.read_csv('data/raw/AAPL.csv')
+    df_sentiment = pd.read_csv('data/processed/AAPL_sentiment.csv')
+    print(len(df_raw), len(df_sentiment))
+    ```
+
+- **Missing API Key**:
+  - Ensure `.env` contains `FINNHUB_API_KEY`.
+
+---
+
+## 🌟 Future Work
+
+- **Add Metrics**: Include maximum drawdown and annualized returns.
+- **LLM Integration**: Implement Module II (LLM as policy) from the paper.
+- **Multi-Stock Trading**: Extend to multiple stocks for portfolio optimization.
+- **Hyperparameter Tuning**: Optimize PPO hyperparameters for better performance.
+
+---
+
+## 📜 License
+
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙌 Acknowledgments
+
+- Inspired by ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059).
+- Built with ❤️ for a TFG in Machine Learning and Finance.
+- Thanks to [Finnhub](https://finnhub.io/) and [Hugging Face](https://huggingface.co/) for APIs and models.
+
+---
+
+*Happy trading! 🚀 Questions or contributions? Open an issue or PR on GitHub!*
