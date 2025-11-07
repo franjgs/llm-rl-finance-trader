@@ -5,71 +5,81 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Status](https://img.shields.io/badge/Status-In%20Progress-orange.svg)
 
-Welcome to **LLM-RL Finance Trader**, a hybrid project that integrates static AI models (e.g., LLMs for feature extraction) with dynamic Reinforcement Learning (RL) to optimize investment strategies in financial markets. Inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059), this repository implements a PPO-based RL agent to manage assets (e.g., AAPL) with and without enhanced features, evaluating performance through metrics like Sharpe Ratio.
+Welcome to **LLM-RL Finance Trader**, a hybrid research project that integrates static AI models (specifically, **FinBERT** for feature extraction) with dynamic **Reinforcement Learning (RL)** to optimize a trading strategy.
 
-This repository is part of a TFG (Trabajo de Fin de Grado) and is designed to be reproducible, portable, and optimized for macOS (Apple M3 Pro with MPS support) using a Conda environment (`llm_rl_finance`).
+Inspired by academic work on financial news-driven RL, this repository implements a **PPO**-based agent to manage assets (e.g., AAPL) by comparing performance **with and without** an enhanced **sentiment feature**.
+
+This repository serves as the core implementation for a TFG (Trabajo de Fin de Grado), emphasizing reproducibility, portability, and optimization for macOS (Apple Silicon MPS support).
 
 ---
 
 ## 🚀 Features
 
-- **Data Fetching**: Downloads historical stock data (e.g., AAPL) using `yfinance`.
-- **Sentiment Analysis**: Integrates financial news from Finnhub and computes sentiment scores using FinBERT.
-- **RL Trading**: Trains a PPO model with Stable-Baselines3 to trade stocks, with optional sentiment integration.
-- **Performance Evaluation**: Compares trading strategies (with/without sentiment) using net worth and Sharpe Ratio.
-- **Visualization**: Generates plots of stock prices, trading actions, and portfolio net worth.
-- **Reproducible Workflow**: Uses relative paths and Conda for portability, with detailed logging for debugging.
+### 🧠 Reinforcement Learning (RL)
+* Trains a **PPO** agent (Stable-Baselines3) using a custom `TradingEnv`.
+* Compares two strategies:
+    * **Baseline:** Uses only **Price and Volume** data.
+    * **Enhanced:** Adds the daily **Sentiment Score** feature.
+* Performance evaluated using **Sharpe Ratio**, **Net Worth**, and **Drawdown**.
+
+---
+
+### 📰 Sentiment Analysis Pipeline (`sentiment_analysis.py`)
+This module aggregates market sentiment by combining data from multiple sources.
+
+* **Source Aggregation**: Collects and merges financial news from **six sources** including **Finnhub**, **Alpha Vantage** (historical, batched), **GDELT** (global), **NewsAPI**, **Google News RSS**, and **Yahoo Finance**.
+* **Model**: Uses the pre-trained **FinBERT** (`ProsusAI/finbert`) model for robust financial sentiment classification.
+* **Hardware Acceleration**: Optimized for fast local inference using **MPS (Apple Silicon)**.
+* **Output**: Converts textual sentiment into a single **numeric value (-1.0 → +1.0)** per trading day.
+* **Caching**: Includes a **cache system** with **deduplication** by `(headline, source)` to minimize API calls and ensure data consistency.
+
+---
+
+### 🔄 Data Workflow
+The project runs sequentially through three main scripts defined in `configs/config.yaml`.
+
+1.  **`data_fetch.py`**: Downloads historical stock data (e.g., AAPL) using `yfinance` based on the dates defined in the config. **Output**: `data/raw/<symbol>_raw.csv`.
+2.  **`sentiment_analysis.py`**: Fetches news, computes FinBERT sentiment, and joins the feature with the historical data. **Output**: `data/processed/<symbol>_sentiment_<source>.csv`.
+3.  **`train_model.py`**: Loads the enriched data, trains two PPO agents (with/without sentiment), simulates their performance, and generates the final comparison plot.
 
 ---
 
 ## 📋 Prerequisites
 
-- **OS**: macOS (optimized for Apple M3 Pro with MPS support)
-- **Python**: 3.11
-- **Conda**: Environment `llm_rl_finance`
-- **External API**: Finnhub API key (stored in `.env`)
+* **OS**: macOS (optimized for **Apple Silicon** with MPS support)
+* **Python**: **3.11**
+* **Conda**: Environment `llm_rl_finance`
+* **External API Keys**: **Finnhub**, Alpha Vantage, and NewsAPI keys (stored in `.env`).
 
 ---
 
 ## 🛠️ Installation
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/your-username/llm-rl-finance-trader.git
-   cd llm-rl-finance-trader
-   ```
+1.  **Clone the Repository**:
+    ```bash
+    git clone [https://github.com/your-username/llm-rl-finance-trader.git](https://github.com/your-username/llm-rl-finance-trader.git)
+    cd llm-rl-finance-trader
+    ```
 
-2. **Set Up Conda Environment**:
-   ```bash
-   conda create -n llm_rl_finance python=3.11
-   conda activate llm_rl_finance
-   ```
+2.  **Set Up Conda Environment**:
+    ```bash
+    conda create -n llm_rl_finance python=3.11
+    conda activate llm_rl_finance
+    ```
 
-3. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Ensure `requirements.txt` includes:
-   ```
-   pandas
-   numpy
-   matplotlib
-   torch
-   stable-baselines3
-   gymnasium
-   yfinance
-   finnhub-python
-   transformers
-   python-dotenv
-   pyyaml
-   ```
+3.  **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-4. **Set Up Finnhub API Key**:
-   - Create a `.env` file in the project root:
-     ```bash
-     echo "FINNHUB_API_KEY=your_api_key" > .env
-     ```
-   - Obtain your API key from [Finnhub](https://finnhub.io/).
+4.  **Set Up API Keys**:
+    - Create a `.env` file in the project root.
+    - Add your required API keys (e.g., Finnhub) to this file:
+    ```bash
+    echo "FINNHUB_API_KEY=your_finnhub_key" > .env
+    echo "ALPHAVANTAGE_API_KEY=your_av_key" >> .env
+    echo "NEWSAPI_KEY=your_newsapi_key" >> .env
+    ```
 
 ---
 
@@ -82,10 +92,11 @@ llm-rl-finance-trader/
 ├── data/                       # Data storage
 │   ├── raw/                    # Raw stock data (e.g., AAPL.csv)
 │   └── processed/              # Processed data with sentiment (e.g., AAPL_sentiment.csv)
+│   └── cache/                  # Cached news with sentiment (e.g., cache_AAPL.json)
 ├── models/                     # Trained RL models
 ├── results/                    # Output plots and results
 ├── src/                        # Auxiliary modules
-│   └── trading_env.py           # Custom Gym environment for trading
+│   └── trading_env.py          # Custom Gym environment for trading
 ├── data_fetch.py               # Fetches stock data
 ├── sentiment_analysis.py       # Computes sentiment from financial news
 ├── train_model.py              # Trains and evaluates RL trading model
@@ -102,15 +113,24 @@ llm-rl-finance-trader/
    Edit `configs/config.yaml`:
    ```yaml
    stock_symbol: AAPL
+   # Capital
+   initial_balance: 10000
+
    start_date: 2023-11-16
    end_date: 2024-11-08
-   data_path: data/processed/AAPL_sentiment.csv
+   # Base directories
+   raw_dir: data/raw
+   processed_dir: data/processed
+   cache_dir: data/cache
    timesteps: 10000
+
+   # Sentiment configuration
+   sentiment_mode: combined  # "individual" or "combined"
    ```
 
 2. **Run the Pipeline**:
    ```bash
-   conda activate llm_rl_finance
+   conda activate Trader
    python data_fetch.py --config configs/config.yaml
    python sentiment_analysis.py --config configs/config.yaml
    python train_model.py --config configs/config.yaml
@@ -154,30 +174,18 @@ Key metrics (from logs):
 
 ## 🐛 Troubleshooting
 
-- **Simulation Stops Early**:
-  - Check logs for `Simulation (with sentiment) stopped early at step X, date=Y. Missing dates: [...]`.
-  - Inspect `src/trading_env.py` to ensure `max_steps = len(df)`.
-
-- **Data Misalignment**:
-  - Verify that `data/raw/AAPL.csv` and `data/processed/AAPL_sentiment.csv` have the same length:
-    ```python
-    import pandas as pd
-    df_raw = pd.read_csv('data/raw/AAPL.csv')
-    df_sentiment = pd.read_csv('data/processed/AAPL_sentiment.csv')
-    print(len(df_raw), len(df_sentiment))
-    ```
-
-- **Missing API Key**:
-  - Ensure `.env` contains `FINNHUB_API_KEY`.
+* **API Rate Limits**: If errors occur during `sentiment_analysis.py`, check the logs. Set `force_refresh: false` in `config.yaml` to utilize the cache and avoid re-fetching headlines already stored in `cache_SYMBOL.json`.
+* **Early Simulation Stop**: If `train_model.py` logs a warning about the simulation stopping early, it indicates the custom environment (`trading_env.py`) reached its `max_steps` limit prematurely due to a data-related issue. Check the alignment of the input CSV.
+* **Dependency Issues (MPS)**: Ensure your `torch` installation supports MPS if you are on Apple Silicon.
 
 ---
 
 ## 🌟 Future Work
 
-- **Add Metrics**: Include maximum drawdown and annualized returns.
-- **LLM Integration**: Implement Module II (LLM as policy) from the paper.
-- **Multi-Stock Trading**: Extend to multiple stocks for portfolio optimization.
-- **Hyperparameter Tuning**: Optimize PPO hyperparameters for better performance.
+* **Advanced Metrics**: Integrate Maximum Drawdown and Annualized Returns into the final evaluation script.
+* **LLM Policy Integration**: Implement the **LLM as Policy** module described in the inspiring paper.
+* **Portfolio Optimization**: Extend the environment to handle trading in **multiple stocks** simultaneously.
+* **Hyperparameter Search**: Implement a framework (e.g., Optuna) for systematic **hyperparameter tuning** of the PPO agent.
 
 ---
 
