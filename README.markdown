@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Status](https://img.shields.io/badge/Status-In%20Progress-orange.svg)
 
-Welcome to **LLM-RL Finance Trader**, a cutting-edge project that combines **Reinforcement Learning (RL)** with **Large Language Models (LLM)** to enhance stock trading strategies using financial news sentiment analysis. Inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059), this project implements a PPO-based RL agent to trade stocks (e.g., AAPL) with and without sentiment data, comparing their performance using metrics like Sharpe Ratio.
+Welcome to **LLM-RL Finance Trader**, a hybrid project that integrates static AI models (e.g., LLMs for feature extraction) with dynamic Reinforcement Learning (RL) to optimize investment strategies in financial markets. Inspired by the paper ["Financial News-Driven LLM Reinforcement Learning for Portfolio Management"](https://arxiv.org/abs/2411.11059), this repository implements a PPO-based RL agent to manage assets (e.g., AAPL) with and without enhanced features, evaluating performance through metrics like Sharpe Ratio.
 
 This repository is part of a TFG (Trabajo de Fin de Grado) and is designed to be reproducible, portable, and optimized for macOS (Apple M3 Pro with MPS support) using a Conda environment (`llm_rl_finance`).
 

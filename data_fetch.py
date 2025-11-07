@@ -1,84 +1,128 @@
-import yfinance as yf
-import pandas as pd
+# data_fetch.py
+# Run in Spyder → df, cfg, output_path visible in Variable Explorer
+# Output: <raw_dir>/<stock_symbol>_raw.csv
+
 import argparse
 import yaml
+import pandas as pd
 import logging
 import os
 from datetime import datetime, timedelta
+import yfinance as yf
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --------------------------------------------------------------------- #
+# Logging configuration
+# --------------------------------------------------------------------- #
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-def load_config(config_path):
-    """Load configuration from a YAML file.
+
+# --------------------------------------------------------------------- #
+# 1. Load configuration
+# --------------------------------------------------------------------- #
+def load_config(path: str) -> dict:
+    """
+    Load configuration from a YAML file.
 
     Args:
-        config_path (str): Path to the YAML configuration file.
+        path: Path to the YAML configuration file.
 
     Returns:
-        dict: Parsed configuration.
-
-    Raises:
-        yaml.YAMLError: If the YAML file is invalid.
-        Exception: For other file loading errors.
+        Configuration dictionary.
     """
     try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        logger.error(f"YAML parsing error in {config_path}: {e}")
-        raise
+        with open(path, "r") as f:
+            cfg = yaml.safe_load(f)
+        logger.info(f"Configuration loaded: {cfg}")
+        return cfg
     except Exception as e:
-        logger.error(f"Error loading config {config_path}: {e}")
+        logger.error(f"Failed to load config {path}: {e}")
         raise
 
-def fetch_stock_data(symbol, start_date, end_date):
-    """Fetch historical stock data using yfinance.
+
+# --------------------------------------------------------------------- #
+# 2. Fetch stock data from Yahoo Finance
+# --------------------------------------------------------------------- #
+def fetch_stock_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    Download historical OHLCV data using yfinance.
 
     Args:
-        symbol (str): Stock ticker symbol (e.g., 'AAPL').
-        start_date (str): Start date in YYYY-MM-DD format.
-        end_date (str): End date in YYYY-MM-DD format.
+        symbol: Stock ticker (e.g., "AAPL").
+        start_date: Start date in "YYYY-MM-DD".
+        end_date: End date in "YYYY-MM-DD" (inclusive).
 
     Returns:
-        pd.DataFrame: Stock data with Date, open, high, low, close, volume.
+        DataFrame with columns: Date, open, high, low, close, volume.
 
     Raises:
-        Exception: If data fetching fails.
+        ValueError: If no data is returned.
     """
     try:
-        # Extend end_date by one day to ensure inclusion
-        end_date_dt = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-        stock = yf.Ticker(symbol)
-        df = stock.history(start=start_date, end=end_date_dt.strftime('%Y-%m-%d'))
+        # Extend end_date by 1 day to include the final trading day
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        end_str = end_dt.strftime("%Y-%m-%d")
+
+        logger.info(f"Downloading {symbol} from {start_date} to {end_date}...")
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(start=start_date, end=end_str, interval="1d")
+
         if df.empty:
-            logger.error(f"No data retrieved for {symbol} from {start_date} to {end_date}")
-            raise ValueError("No data retrieved from yfinance")
+            raise ValueError(f"No data for {symbol} in date range")
+
+        # Clean and standardize
         df = df.reset_index()
-        df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-        df.columns = ['Date', 'open', 'high', 'low', 'close', 'volume']
-        df['Date'] = pd.to_datetime(df['Date']).dt.date
-        logger.info(f"Fetched {len(df)} rows for {symbol} from {start_date} to {end_date}")
+        df = df[["Date", "Open", "High", "Low", "Close", "Volume"]]
+        df.columns = ["Date", "open", "high", "low", "close", "volume"]
+        df["Date"] = pd.to_datetime(df["Date"]).dt.date
+
+        logger.info(f"Retrieved {len(df)} trading days for {symbol}")
         return df
     except Exception as e:
-        logger.error(f"Error fetching data for {symbol}: {e}")
+        logger.error(f"yfinance error for {symbol}: {e}")
         raise
 
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description="Fetch stock data using yfinance")
-parser.add_argument("--config", default="configs/config.yaml", help="Path to config file")
+
+# --------------------------------------------------------------------- #
+# 3. Argument parsing
+# --------------------------------------------------------------------- #
+parser = argparse.ArgumentParser(
+    description="Fetch historical stock data from Yahoo Finance"
+)
+parser.add_argument(
+    "--config", default="configs/config.yaml", help="Path to config file"
+)
 args = parser.parse_args()
 
-# Load configuration
-config = load_config(args.config)
-logger.info(f"Loaded config: {config}")
 
-# Fetch stock data
-df = fetch_stock_data(config['stock_symbol'], config['start_date'], config['end_date'])
+# --------------------------------------------------------------------- #
+# 4. Main execution
+# --------------------------------------------------------------------- #
+cfg = load_config(args.config)
 
-# Save data
-os.makedirs('data/raw', exist_ok=True)
-output_path = f"data/raw/{config['stock_symbol']}.csv"
+symbol = cfg["stock_symbol"]
+raw_dir = cfg["raw_dir"]
+
+# Auto-generated output path: <raw_dir>/<symbol>_raw.csv
+output_path = f"{raw_dir}/{symbol}_raw.csv"
+
+# Fetch data
+df = fetch_stock_data(
+    symbol=symbol,
+    start_date=cfg["start_date"],
+    end_date=cfg["end_date"],
+)
+
+# Save raw data
+os.makedirs(raw_dir, exist_ok=True)
 df.to_csv(output_path, index=False)
-logger.info(f"Saved stock data to {output_path}")
+logger.info(f"Stock data saved → {output_path}")
+
+
+# --------------------------------------------------------------------- #
+# Variables available in Spyder
+# --------------------------------------------------------------------- #
+# df, cfg, output_path

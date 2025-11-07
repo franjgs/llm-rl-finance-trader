@@ -1,6 +1,48 @@
-# Configuration for LLM-RL trading project
-data_path: data/processed/AAPL_sentiment.csv
-timesteps: 10000
+# configs/config.yaml
+verbose: 0 # 0, 1
+stock_symbol: NVDA      # ← Sentiment's king in 2025
+# Other TOP options:
+# stock_symbol: TSLA
+# stock_symbol: META
+# stock_symbol: GOOGL
+stock_symbol: AAPL
+# stock_symbol: MSFT
+# stock_symbol: AMD
+
+# Capital
+initial_balance: 10000
+
 start_date: "2023-11-16"
-end_date: "2024-11-10"
-stock_symbol: "AAPL"
+end_date: "2024-11-10"   
+# start_date: "2024-11-06"
+# end_date: "2025-11-05"
+
+# Base directories
+raw_dir: data/raw
+processed_dir: data/processed
+cache_dir: data/cache
+
+# Sentiment configuration
+sentiment_mode: combined  # "individual" or "combined"
+sentiment_sources:       # Only used if mode == "combined"
+  - alphavantage
+  - newsapi
+  - googlenews
+  - gdelt
+  - finnhub  # 
+  - yahoo
+sentiment_source: finnhub_orig  # Only used if mode == "individual". finnhub_orig # finnhub_orig # alphavantage  # finnhub, alphavantage, yahoo
+force_refresh: false
+
+# Training
+timesteps: 10000
+ppo_lr: 0.0001
+ppo_n_steps: 256
+ppo_batch_size: 128
+ppo_gamma: 0.99
+ppo_gae_lambda: 0.95
+ppo_clip_range: 0.1
+seed: null  # Fixed: 42 | Random: null (or comment line)
+
+# Experimental
+replicates: 2  # 1 = single run, >1 = replication mode

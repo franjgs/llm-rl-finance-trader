@@ -35,3 +35,6 @@ conda-bld/
 .vscode/
 .idea/
 .env
+data/cache/    
+.cache/
+logs/
