@@ -1,7 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Nov 10 12:04:42 2025
+
+@author: fran
+"""
+
 # src/sentiment_analysis.py
-# Run in Spyder → df, sentiment visible
-# Input:  data/raw/<symbol>_raw.csv
-# Output: data/processed/<symbol>_sentiment_<source>.csv
 """
 Enrich historical stock data with daily news sentiment using multiple sources.
 
@@ -11,6 +16,9 @@ Key features:
 - Cache with deduplication by (headline, source)
 - 6 news sources with time limits respected
 - Outputs numeric sentiment (-1 to +1) for RL training
+- Input: data/raw/<symbol>_raw.csv
+- Output: data/processed/<symbol>_sentiment_<source>.csv
+- Run in Spyder → df, sentiment visible
 """
 
 import argparse
@@ -45,27 +53,61 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------- #
 class SentimentAnalyzer:
     """Hugging Face sentiment analyzer with MPS support."""
+    
     def __init__(self, model_name: str = "ProsusAI/finbert"):
+        """
+        Initialize the sentiment analyzer with the specified model.
+        
+        Parameters
+        ----------
+        model_name : str
+            Hugging Face model name. Defaults to FinBERT.
+        """
         logger.info(f"Loading sentiment model: {model_name}")
         mps_available = torch.backends.mps.is_available()
         device_name = "mps" if mps_available else "cpu"
         pipeline_device = 0 if mps_available else -1
         logger.info(f"Using device: {device_name}")
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        self.model.to(device_name)
-        self.model.eval()
-
-        self.pipe = pipeline(
-            "sentiment-analysis",
-            model=self.model,
-            tokenizer=self.tokenizer,
-            device=pipeline_device
-        )
+        
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            self.model.to(device_name)
+            self.model.eval()
+            self.pipe = pipeline(
+                "sentiment-analysis",
+                model=self.model,
+                tokenizer=self.tokenizer,
+                device=pipeline_device
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load {model_name}: {e}. Falling back to distilbert.")
+            model_name = "distilbert-base-uncased-finetuned-sst-2-english"
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            self.model.to(device_name)
+            self.model.eval()
+            self.pipe = pipeline(
+                "sentiment-analysis",
+                model=self.model,
+                tokenizer=self.tokenizer,
+                device=pipeline_device
+            )
 
     def score(self, text: str) -> float:
-        """Return numeric sentiment: +score (POS), -score (NEG), 0.0 (NEU/ERROR)."""
+        """
+        Return numeric sentiment: +score (POS), -score (NEG), 0.0 (NEU/ERROR).
+        
+        Parameters
+        ----------
+        text : str
+            Input headline or concatenated news.
+        
+        Returns
+        -------
+        float
+            Sentiment score in range [-1.0, 1.0].
+        """
         if not text.strip():
             return 0.0
         try:
@@ -86,11 +128,14 @@ class SentimentAnalyzer:
 # Cache management
 # --------------------------------------------------------------------- #
 def get_cache_file(cfg: dict, symbol: str) -> str:
+    """Return the path to the cache file for the given symbol."""
     cache_dir = cfg.get("cache_dir", "data/cache")
     os.makedirs(cache_dir, exist_ok=True)
-    return os.path.join(cache_dir, f"{symbol.upper()}.json")
+    return os.path.join(cache_dir, f"{symbol.upper()}_sentiment_cache.json")
+
 
 def load_cache(cfg: dict, symbol: str) -> List[Dict]:
+    """Load cached news items from disk."""
     path = get_cache_file(cfg, symbol)
     if os.path.exists(path):
         try:
@@ -102,7 +147,9 @@ def load_cache(cfg: dict, symbol: str) -> List[Dict]:
             logger.warning(f"Cache load failed: {e}")
     return []
 
+
 def save_cache(cfg: dict, symbol: str, data: List[Dict]):
+    """Save news items to cache."""
     path = get_cache_file(cfg, symbol)
     try:
         with open(path, "w") as f:
@@ -111,7 +158,9 @@ def save_cache(cfg: dict, symbol: str, data: List[Dict]):
     except Exception as e:
         logger.error(f"Cache save failed: {e}")
 
+
 def merge_and_deduplicate(old: List[Dict], new: List[Dict]) -> List[Dict]:
+    """Merge old and new news, deduplicating by (headline, source)."""
     seen = {(d["headline"], d.get("source", "")): d for d in old}
     seen.update({(d["headline"], d.get("source", "")): d for d in new})
     return list(seen.values())
@@ -121,17 +170,20 @@ def merge_and_deduplicate(old: List[Dict], new: List[Dict]) -> List[Dict]:
 # 1. Finnhub – Recent (~30 days)
 # --------------------------------------------------------------------- #
 def fetch_finnhub_news(symbol: str, start: str, end: str) -> List[Dict]:
+    """Fetch news from Finnhub (requires API key)."""
     load_dotenv()
     api_key = os.getenv("FINNHUB_API_KEY")
     if not api_key:
         logger.warning("FINNHUB_API_KEY missing")
         return []
+    
     client = finnhub.Client(api_key=api_key)
     today = datetime.now().strftime("%Y-%m-%d")
     if end > today:
         end = today
     if start > end:
         return []
+    
     try:
         raw = client.company_news(symbol, _from=start, to=end)
         items = []
@@ -153,15 +205,18 @@ def fetch_finnhub_news(symbol: str, start: str, end: str) -> List[Dict]:
 # 2. Alpha Vantage – Historical (2+ years)
 # --------------------------------------------------------------------- #
 def fetch_alphavantage_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
+    """Fetch news from Alpha Vantage (requires API key)."""
     load_dotenv()
     api_key = os.getenv("ALPHAVANTAGE_API_KEY")
     if not api_key:
         logger.warning("ALPHAVANTAGE_API_KEY missing")
         return []
+    
     url = "https://www.alphavantage.co/query"
     delta = timedelta(days=30)
     current = start_dt
     all_items = []
+    
     while current < end_dt:
         next_dt = min(current + delta, end_dt)
         params = {
@@ -188,6 +243,7 @@ def fetch_alphavantage_news(symbol: str, start_dt: date, end_dt: date) -> List[D
             logger.error(f"Alpha Vantage error: {e}")
             break
         current = next_dt + timedelta(days=1)
+    
     logger.info(f"Alpha Vantage: {len(all_items)} headlines")
     return all_items
 
@@ -196,14 +252,17 @@ def fetch_alphavantage_news(symbol: str, start_dt: date, end_dt: date) -> List[D
 # 3. NewsAPI – Last 30 days (free tier)
 # --------------------------------------------------------------------- #
 def fetch_newsapi_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
+    """Fetch news from NewsAPI.org (free tier, last 30 days)."""
     load_dotenv()
     api_key = os.getenv("NEWSAPI_KEY")
     if not api_key:
         logger.warning("NEWSAPI_KEY missing")
         return []
+    
     adjusted_start = max(start_dt, end_dt - timedelta(days=30))
     if adjusted_start > start_dt:
         logger.info("NewsAPI: Clipped to last 30 days (free tier)")
+    
     url = "https://newsapi.org/v2/everything"
     params = {
         "q": f"{symbol} stock OR {symbol} earnings",
@@ -235,6 +294,7 @@ def fetch_newsapi_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
         except Exception as e:
             logger.error(f"NewsAPI error: {e}")
             break
+    
     logger.info(f"NewsAPI: {len(items)} headlines")
     return items
 
@@ -243,6 +303,7 @@ def fetch_newsapi_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
 # 4. Yahoo Finance RSS – Today only
 # --------------------------------------------------------------------- #
 def fetch_yahoo_news() -> List[Dict]:
+    """Fetch today's headlines from Yahoo Finance RSS."""
     url = "https://feeds.finance.yahoo.com/rss/2.0/headline"
     try:
         feed = feedparser.parse(url)
@@ -268,6 +329,7 @@ def fetch_yahoo_news() -> List[Dict]:
 # 5. Google News RSS – Recent
 # --------------------------------------------------------------------- #
 def fetch_google_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
+    """Fetch recent news from Google News RSS."""
     url = f"https://news.google.com/rss/search?q={symbol}+stock+when:1y"
     try:
         feed = feedparser.parse(url)
@@ -291,15 +353,14 @@ def fetch_google_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
 # --------------------------------------------------------------------- #
 def fetch_gdelt_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
     """
-    Fetch global news from GDELT.
-    GDELT only has data for the last ~15 days.
+    Fetch global news from GDELT (last ~15 days only).
     """
     COMPANY_MAP = {
         "NVDA": "NVIDIA", "AAPL": "Apple", "TSLA": "Tesla", "MSFT": "Microsoft",
         "GOOGL": "Alphabet", "AMZN": "Amazon", "META": "Meta",
     }
     company = COMPANY_MAP.get(symbol.upper(), symbol)
-
+    
     # Clip to last 15 days
     today = date.today()
     max_start = today - timedelta(days=15)
@@ -307,10 +368,9 @@ def fetch_gdelt_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
     if start_dt > end_dt:
         logger.info("GDELT: No data (outside last 15 days)")
         return []
-
+    
     raw_query = f'{company} stock'
     encoded_query = urllib.parse.quote(raw_query)
-
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     params = {
         "query": encoded_query,
@@ -320,7 +380,6 @@ def fetch_gdelt_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
         "startdatetime": start_dt.strftime("%Y%m%d000000"),
         "enddatetime": end_dt.strftime("%Y%m%d235959"),
     }
-
     try:
         r = requests.get(url, params=params, timeout=20)
         r.raise_for_status()
@@ -339,7 +398,6 @@ def fetch_gdelt_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
         return []
     except requests.exceptions.JSONDecodeError as e:
         logger.error(f"GDELT JSON error: {e}")
-        logger.error(f"Raw response: {r.text[:500]}")
         return []
     except Exception as e:
         logger.error(f"GDELT error: {e}")
@@ -350,11 +408,13 @@ def fetch_gdelt_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
 # News dispatcher
 # --------------------------------------------------------------------- #
 def fetch_news(symbol: str, start_dt: date, end_dt: date, mode: str, sources: List[str]) -> List[Dict]:
+    """Dispatch news fetching based on mode and sources."""
     news_items = []
+    
     def add(items):
         if items:
             news_items.extend(items)
-
+    
     if mode == "individual":
         src = sources[0] if sources else "finnhub"
         if src == "finnhub":
@@ -371,7 +431,7 @@ def fetch_news(symbol: str, start_dt: date, end_dt: date, mode: str, sources: Li
             add(fetch_gdelt_news(symbol, start_dt, end_dt))
         else:
             logger.warning(f"Unknown source: {src}")
-
+    
     elif mode == "combined":
         for src in sources:
             if src == "finnhub":
@@ -388,10 +448,10 @@ def fetch_news(symbol: str, start_dt: date, end_dt: date, mode: str, sources: Li
                 add(fetch_gdelt_news(symbol, start_dt, end_dt))
             else:
                 logger.warning(f"Unknown source in combined: {src}")
-
+    
     else:
         raise ValueError("sentiment_mode must be 'individual' or 'combined'")
-
+    
     logger.info(f"Total raw headlines: {len(news_items)}")
     return news_items
 
@@ -408,13 +468,11 @@ args = parser.parse_args()
 # Main execution
 # --------------------------------------------------------------------- #
 cfg = yaml.safe_load(open(args.config))
-
 symbol = cfg["stock_symbol"]
 mode = cfg.get("sentiment_mode", "individual").lower()
 sources = cfg.get("sentiment_sources", ["finnhub"])
 model_name = cfg.get("sentiment_model", "ProsusAI/finbert")
 force_refresh = cfg.get("force_refresh", False)
-
 start_dt = datetime.strptime(cfg["start_date"], "%Y-%m-%d").date()
 end_dt = datetime.strptime(cfg["end_date"], "%Y-%m-%d").date()
 
@@ -433,12 +491,12 @@ df.reset_index(drop=True, inplace=True)
 logger.info(f"Loaded {len(df)} trading days")
 
 # Cache
-cached = [] if force_refresh else load_cache(symbol)
+cached = [] if force_refresh else load_cache(cfg, symbol)
 fresh = fetch_news(symbol, start_dt, end_dt, mode, sources)
 combined = merge_and_deduplicate(cached, fresh)
-save_cache(symbol, combined)
+save_cache(cfg, symbol, combined)
 
-# Map news to dates
+# Map news to dates (max 3 headlines per day)
 news_by_date = {}
 for item in combined:
     news_by_date.setdefault(item["date"], []).append(item["headline"])
@@ -453,6 +511,7 @@ for date_val in df["Date"]:
 analyzer = SentimentAnalyzer(model_name)
 df["news"] = texts
 df["sentiment"] = [analyzer.score(text) for text in texts]
+
 logger.info(f"Sentiment mean: {df['sentiment'].mean():.4f} | std: {df['sentiment'].std():.4f}")
 
 # Save
@@ -467,3 +526,6 @@ pos = (df["sentiment"] > 0.1).sum()
 neg = (df["sentiment"] < -0.1).sum()
 neu = len(df) - pos - neg
 logger.info(f"Sentiment summary: POS={pos}, NEG={neg}, NEU={neu}")
+
+# Make variables visible in Spyder
+sentiment = df["sentiment"].copy()

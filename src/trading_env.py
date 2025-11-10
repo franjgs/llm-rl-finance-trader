@@ -1,231 +1,208 @@
 # src/trading_env.py
 """
-PPO-Compatible Trading Environment for Single-Asset Trading with Sentiment.
-Features:
-- Continuous action space: -1 (full short) to +1 (full long)
-- Fractional position management
-- Commission cost (0.05% default)
-- Reward: PnL - commission
-- Optional sentiment signal
-- Real-time rendering with Matplotlib
-- Compatible with Gymnasium, PPO, and Stable-Baselines3
-- Date as column (required)
-- net_worth calculated internally
+Gymnasium-compatible trading environment.
+
+Features
+--------
+- Discrete actions: 0=hold, 1=buy, 2=sell
+- Optional sentiment feature
+- Configurable initial balance
+- Windowed observations for LSTM (window_size > 1)
+- Robust reset/step with index safety
+- Compatible with Stable-Baselines3 + LSTM policy
 """
 
 import gymnasium as gym
 import numpy as np
 import pandas as pd
 from gymnasium import spaces
-import matplotlib.pyplot as plt
+from collections import deque
+from typing import Optional, Tuple, Dict, Any
 
 
 class TradingEnv(gym.Env):
     """
-    Custom Gymnasium environment for financial trading with sentiment.
+    Custom trading environment for RL agents.
 
-    Action Space:
-        Box(-1, 1) → target position (-1 = full short, +1 = full long)
+    Observation
+    -----------
+    - window_size == 1 → [open, high, low, close, volume, (sentiment)]
+    - window_size > 1 → stacked history of above (shape: (window_size, n_features))
 
-    Observation Space:
-        [close, volume, sentiment, open, high, low] (if use_sentiment=True)
+    Action Space
+    ------------
+    Discrete(3):
+        0 → Hold
+        1 → Buy (all available cash)
+        2 → Sell (all held shares)
 
-    Reward:
-        PnL from position change - commission cost
+    Reward
+    ------
+    Profit from sell actions only.
     """
+
     metadata = {"render_modes": ["human"]}
 
     def __init__(
         self,
         df: pd.DataFrame,
         use_sentiment: bool = True,
-        commission: float = 0.0005,
-        initial_balance: float = 10_000.0
-    ):
+        initial_balance: float = 10_000.0,
+        window_size: int = 1,
+    ) -> None:
         """
         Initialize the trading environment.
 
-        Args:
-            df (pd.DataFrame): Must have columns ['Date', 'open', 'high', 'low', 'close', 'volume', 'sentiment']
-            use_sentiment (bool): Include sentiment in observation
-            commission (float): Trading commission per unit of position change
-            initial_balance (float): Starting cash
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Must contain columns: ['Date', 'open', 'high', 'low', 'close', 'volume']
+            Optional: 'sentiment'
+            Index will be ignored; Date used for logging only.
+        use_sentiment : bool
+            Include sentiment in observation if available.
+        initial_balance : float
+            Starting cash.
+        window_size : int
+            Number of past steps to include in observation (for LSTM).
         """
         super().__init__()
+
         if "Date" not in df.columns:
-            raise ValueError("DataFrame must have 'Date' as a column (not index)")
+            raise ValueError("DataFrame must have 'Date' column")
+        if not {"open", "high", "low", "close", "volume"}.issubset(df.columns):
+            raise ValueError("DataFrame missing required price/volume columns")
+
+        # Clean and reset
         self.df = df.dropna().reset_index(drop=True)
-        self.use_sentiment = use_sentiment
-        self.commission = commission
-        self.initial_balance = initial_balance
+        if len(self.df) == 0:
+            raise ValueError("DataFrame is empty after dropping NaN")
 
-        # State variables
-        self.balance = initial_balance
-        self.position = 0.0  # Current position (-1 to +1)
-        self.net_worth = initial_balance
-        self.current_step = 0
-        self.max_steps = len(self.df) - 1  # Need next price for PnL
+        self.use_sentiment = use_sentiment and "sentiment" in self.df.columns
+        self.initial_balance = float(initial_balance)
+        self.window_size = int(window_size)
 
-        # Observation: close, volume, sentiment, open, high, low
-        obs_dim = 6 if use_sentiment else 5
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
-        )
+        # State
+        self.balance: float = self.initial_balance
+        self.shares_held: float = 0.0
+        self.current_step: int = 0
+        self.max_steps: int = len(self.df) - 1
 
-        # Continuous action: target position
-        self.action_space = spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
+        # Features per step
+        self.feature_cols = ["open", "high", "low", "close", "volume"]
+        if self.use_sentiment:
+            self.feature_cols.append("sentiment")
+        self.n_features = len(self.feature_cols)
 
-        # Rendering
-        self.fig = None
-        self.history = []  # For backtesting
+        # Observation space
+        if self.window_size == 1:
+            self.observation_space = spaces.Box(
+                low=-np.inf, high=np.inf, shape=(self.n_features,), dtype=np.float32
+            )
+        else:
+            low = np.full((self.window_size, self.n_features), -np.inf, dtype=np.float32)
+            high = np.full((self.window_size, self.n_features), np.inf, dtype=np.float32)
+            self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
-    def reset(self, seed=None, options=None):
+        self.action_space = spaces.Discrete(3)
+
+        # History buffer for windowed obs
+        self.window_buffer: deque[np.ndarray] = deque(maxlen=self.window_size)
+
+    def reset(
+        self, seed: Optional[int] = None, options: Optional[Dict] = None
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        Reset the environment to initial state.
+        Reset environment to initial state.
 
-        Returns:
-            obs (np.ndarray): Initial observation
-            info (dict): Empty info dict
+        Returns
+        -------
+        obs : np.ndarray
+            Initial observation.
+        info : dict
+            Empty info dict.
         """
         super().reset(seed=seed)
         self.current_step = 0
         self.balance = self.initial_balance
-        self.position = 0.0
-        self.net_worth = self.initial_balance
-        self.history = []
+        self.shares_held = 0.0
+        self.window_buffer.clear()
 
-        if self.fig is not None:
-            plt.close(self.fig)
-            self.fig = None
+        # Initialize buffer with first row(s)
+        first_row = self.df.iloc[0]
+        first_obs = np.array([first_row[col] for col in self.feature_cols], dtype=np.float32)
+
+        if self.window_size == 1:
+            self.window_buffer.append(first_obs)
+        else:
+            zero_obs = np.zeros(self.n_features, dtype=np.float32)
+            for _ in range(self.window_size - 1):
+                self.window_buffer.append(zero_obs)
+            self.window_buffer.append(first_obs)
 
         return self._get_observation(), {}
 
     def _get_observation(self) -> np.ndarray:
-        """
-        Get current observation vector.
+        """Return current observation (windowed or single)."""
+        if self.window_size == 1:
+            return self.window_buffer[0]
+        else:
+            return np.stack(list(self.window_buffer)).astype(np.float32)
 
-        Returns:
-            np.ndarray: [close, volume, sentiment, open, high, low] or subset
-        """
-        idx = min(self.current_step, len(self.df) - 1)
-        row = self.df.iloc[idx]
-        obs = [
-            row["close"],
-            row["volume"],
-            row.get("sentiment", 0.0) if self.use_sentiment else 0.0,
-            row["open"],
-            row["high"],
-            row["low"]
-        ]
-        return np.array(obs[:6 if self.use_sentiment else 5], dtype=np.float32)
-
-    def step(self, action):
+    def step(self, action) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
         Execute one time step.
 
-        Args:
-            action: Target position. Accepts float or np.ndarray.
+        Parameters
+        ----------
+        action : int
+            0=hold, 1=buy, 2=sell
 
-        Returns:
-            obs, reward, terminated, truncated, info
+        Returns
+        -------
+        obs, reward, terminated, truncated, info
         """
-        # Accept float or array
-        if isinstance(action, np.ndarray):
-            action = float(np.clip(action[0], -1, 1))
-        else:
-            action = float(np.clip(action, -1, 1))
+        if not self.action_space.contains(action):
+            raise ValueError(f"Invalid action: {action}")
 
-        current_price = self.df.iloc[self.current_step]["close"]
+        current_price = float(self.df.iloc[self.current_step]["close"])
+        reward = 0.0
 
-        # Next price for PnL
-        next_price = (
-            self.df.iloc[self.current_step + 1]["close"]
-            if self.current_step + 1 < len(self.df)
-            else current_price
-        )
+        if action == 1:  # Buy
+            shares_to_buy = self.balance // current_price
+            cost = shares_to_buy * current_price
+            self.shares_held += shares_to_buy
+            self.balance -= cost
 
-        # Trade execution
-        trade = action - self.position
-        commission_cost = abs(trade) * current_price * self.commission
-        self.balance -= commission_cost
-        self.position = action
+        elif action == 2:  # Sell
+            revenue = self.shares_held * current_price
+            self.balance += revenue
+            reward = revenue  # Reward = profit from selling
+            self.shares_held = 0.0
 
-        # PnL calculation
-        pnl = self.position * (next_price - current_price)
-        self.balance += pnl
-        self.net_worth = self.balance + self.position * next_price
-        reward = pnl - commission_cost
-
-        # Step forward
+        # Advance step
         self.current_step += 1
         terminated = self.current_step >= self.max_steps
         truncated = False
 
-        # Record history (safe index)
-        history_step = min(self.current_step, len(self.df) - 1)
-        self.history.append({
-            "step": self.current_step,
-            "date": self.df.iloc[history_step]["Date"],
-            "action": action,
-            "price": current_price,
-            "net_worth": self.net_worth,
-            "sentiment": self.df.iloc[history_step].get("sentiment", 0.0),
-            "pnl": pnl,
-            "commission": commission_cost
-        })
+        # Update observation buffer
+        if self.current_step < len(self.df):
+            row = self.df.iloc[self.current_step]
+            obs_vec = np.array([row[col] for col in self.feature_cols], dtype=np.float32)
+            self.window_buffer.append(obs_vec)
 
-        obs = self._get_observation()
-        return obs, float(reward), terminated, truncated, {}
+        return self._get_observation(), float(reward), terminated, truncated, {}
 
-    def render(self, mode: str = "human"):
-        """
-        Render the environment (Matplotlib).
-
-        Args:
-            mode (str): Only "human" supported
-        """
+    def render(self, mode: str = "human") -> None:
+        """Render current state (console only)."""
         if mode != "human":
             return
+        price = self.df.iloc[self.current_step]["close"]
+        net_worth = self.balance + self.shares_held * price
+        print(f"Step: {self.current_step} | Price: {price:,.2f} | "
+              f"Shares: {self.shares_held} | Balance: ${self.balance:,.2f} | "
+              f"Net Worth: ${net_worth:,.2f}")
 
-        if self.fig is None:
-            self.fig = plt.figure(figsize=(12, 8))
-            plt.ion()
-
-        plt.clf()
-
-        steps = min(self.current_step + 1, len(self.df))
-        dates = self.df["Date"].iloc[:steps]
-        prices = self.df["close"].iloc[:steps]
-
-        # Price + Position
-        ax1 = plt.subplot(2, 1, 1)
-        ax1.plot(dates, prices, label="Close Price", color="blue", linewidth=1.5)
-        if self.current_step < len(self.df):
-            color = "green" if self.position > 0 else "red" if self.position < 0 else "gray"
-            ax1.scatter(
-                dates.iloc[self.current_step],
-                prices.iloc[self.current_step],
-                color=color, s=80, marker="o", zorder=5
-            )
-        ax1.set_title(f"Step {self.current_step} | Net Worth: ${self.net_worth:,.2f} | Position: {self.position:+.2f}")
-        ax1.set_ylabel("Price ($)")
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-
-        # Net Worth
-        ax2 = plt.subplot(2, 1, 2)
-        nw_history = [self.initial_balance] + [h["net_worth"] for h in self.history]
-        ax2.plot(range(len(nw_history)), nw_history, label="Net Worth", color="purple")
-        ax2.set_ylabel("Net Worth ($)")
-        ax2.set_xlabel("Step")
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.pause(0.01)
-
-    def close(self):
-        """Close the rendering window."""
-        if self.fig is not None:
-            plt.close(self.fig)
-            self.fig = None
+    def close(self) -> None:
+        """Cleanup (no-op)."""
+        pass

@@ -97,6 +97,8 @@ llm-rl-finance-trader/
 ├── results/                    # Output plots and results
 ├── src/                        # Auxiliary modules
 │   └── trading_env.py          # Custom Gym environment for trading
+│   └── rl_utils.py		# Customize LSTM Policy
+│   └── plot_utils.py		# Plot Utils
 ├── data_fetch.py               # Fetches stock data
 ├── sentiment_analysis.py       # Computes sentiment from financial news
 ├── train_model.py              # Trains and evaluates RL trading model

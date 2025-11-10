@@ -1,7 +1,11 @@
 # configs/config.yaml
-verbose: 0 # 0, 1
-stock_symbol: NVDA      # ← Sentiment's king in 2025
-# Other TOP options:
+
+# Verbosity level (0 = silent, 1 = detailed logs)
+verbose: 0
+
+# Stock symbol to analyze
+# stock_symbol: NVDA      # ← Sentiment's king in 2025
+# Other top options:
 # stock_symbol: TSLA
 # stock_symbol: META
 # stock_symbol: GOOGL
@@ -9,40 +13,72 @@ stock_symbol: AAPL
 # stock_symbol: MSFT
 # stock_symbol: AMD
 
-# Capital
+# Initial trading capital
 initial_balance: 10000
 
+# Date range for historical data
 start_date: "2023-11-16"
-end_date: "2024-11-10"   
+end_date: "2024-11-10"
 # start_date: "2024-11-06"
 # end_date: "2025-11-05"
 
-# Base directories
+# Directory paths
 raw_dir: data/raw
 processed_dir: data/processed
 cache_dir: data/cache
 
 # Sentiment configuration
-sentiment_mode: combined  # "individual" or "combined"
-sentiment_sources:       # Only used if mode == "combined"
+sentiment_mode: individual   # "individual" or "combined"
+sentiment_sources:         # Used only when mode == "combined"
   - alphavantage
   - newsapi
   - googlenews
   - gdelt
-  - finnhub  # 
+  - finnhub
   - yahoo
-sentiment_source: finnhub_orig  # Only used if mode == "individual". finnhub_orig # finnhub_orig # alphavantage  # finnhub, alphavantage, yahoo
-force_refresh: false
+sentiment_source: finnhub_orig  # Used only when mode == "individual" (e.g., finnhub, alphavantage, yahoo)
+force_refresh: false        # If true, rebuilds cache and refetches all news
 
-# Training
+# === ALGORITHM ===
+algo: PPO  # PPO, SAC, TD3, A2C
+
+# === TRAINING ===
 timesteps: 10000
+
+# === PPO ===
 ppo_lr: 0.0001
 ppo_n_steps: 256
 ppo_batch_size: 128
 ppo_gamma: 0.99
 ppo_gae_lambda: 0.95
 ppo_clip_range: 0.1
-seed: null  # Fixed: 42 | Random: null (or comment line)
+ppo_ent_coef: 0.001
 
-# Experimental
-replicates: 2  # 1 = single run, >1 = replication mode
+# === SAC ===
+sac_buffer_size: 100000
+sac_learning_starts: 1000
+sac_train_freq: 1
+sac_gradient_steps: 1
+sac_ent_coef: "auto"
+
+# === TD3 ===
+td3_buffer_size: 100000
+td3_learning_starts: 1000
+td3_train_freq: 1
+td3_gradient_steps: 1
+
+# === A2C ===
+a2c_n_steps: 5
+a2c_gae_lambda: 1.0
+a2c_ent_coef: 0.01
+
+# === RL + LSTM ===
+use_lstm: false          # ← RL + LSTM
+lstm_window: 32         # memory steps
+lstm_hidden_size: 64    # hidden size
+
+# Random seed (42 = fixed, null = random)
+seed: null
+
+# Experimental setup
+replicates: 1  # 1 = single run, >1 = replication mode
