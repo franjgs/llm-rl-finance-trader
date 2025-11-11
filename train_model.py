@@ -32,7 +32,7 @@ def load_config(config_path):
     try:
         with open(config_path, 'r') as f:
             content = f.read()
-            logger.info(f"YAML content:\n{content}")
+            # logger.info(f"YAML content:\n{content}")
             return yaml.safe_load(content)
     except yaml.YAMLError as e:
         logger.error(f"YAML parsing error in {config_path}: {e}")
@@ -58,7 +58,9 @@ parser.add_argument("--random-seed", action="store_true", help="Use random seed"
 args = parser.parse_args()
 
 config = load_config(args.config)
-logger.info(f"Loaded config: {config}")
+verbose = config.get("verbose", 0)
+if verbose:
+    logger.info(f"Loaded config: {config}")
 
 symbol = config["stock_symbol"]
 initial_balance = config.get("initial_balance", 10000)
@@ -219,7 +221,7 @@ base_kwargs = {
     "gamma": config.get("ppo_gamma", 0.99),
     "seed": seed,
     "device": device,
-    "verbose": config.get("verbose", 0)
+    "verbose": verbose
 }
 ppo_specific = {
     "n_steps": lstm_window if use_lstm else config.get("ppo_n_steps", 256),

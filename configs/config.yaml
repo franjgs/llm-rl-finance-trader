@@ -6,12 +6,12 @@ verbose: 0
 # Stock symbol to analyze
 stock_symbol: NVDA      # ← Sentiment's king in 2025
 # Other top options:
-stock_symbol: TSLA
-stock_symbol: META
-stock_symbol: GOOGL
-stock_symbol: AAPL
-stock_symbol: MSFT
-stock_symbol: AMD
+# stock_symbol: TSLA
+# stock_symbol: META
+# stock_symbol: GOOGL
+# stock_symbol: AAPL
+# stock_symbol: MSFT
+# stock_symbol: AMD
 
 # Initial trading capital
 initial_balance: 10000
@@ -83,4 +83,4 @@ seed: null
 
 # Experimental setup
 train_test_split : 0.7  # Train / Test split (70 % / 30 %)
-replicates: 1  # 1 = single run, >1 = replication mode
+replicates: 10  # 1 = single run, >1 = replication mode
