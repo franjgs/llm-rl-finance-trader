@@ -72,7 +72,11 @@ algo_name = config.get("algo", "PPO")
 use_lstm = config.get("use_lstm", False)
 lstm_window = config.get("lstm_window", 32)
 lstm_hidden_size = config.get("lstm_hidden_size", 64)
+train_test_split = config.get("train_test_split", 0.7)  # ← NUEVO
 replicates = config.get("replicates", 1)
+
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+logger.info(f"Using device: {device}")
 
 # === SEED HANDLING ===
 config_seed = config.get("seed")
@@ -109,9 +113,106 @@ df.set_index("Date", inplace=True)
 df.name = symbol
 logger.info(f"Filtered data: {len(df)} rows from {df.index.min()} to {df.index.max()}")
 
-device = "mps" if torch.backends.mps.is_available() else "cpu"
-logger.info(f"Using device: {device}")
+# === TRAIN / TEST SPLIT (CONFIGURABLE) ===
+split_idx = int(train_test_split * len(df))
+train_df = df.iloc[:split_idx].copy()
+test_df = df.iloc[split_idx:].copy()
 
+logger.info(f"TRAIN: {len(train_df)} days ({train_test_split*100:.0f}%) | TEST: {len(test_df)} days ({(1-train_test_split)*100:.0f}%)")
+
+# === SIMULATE FUNCTION (GLOBAL) ===
+def simulate(
+    model,
+    use_sentiment: bool,
+    df: pd.DataFrame,
+    initial_balance: float,
+    window_size: int,
+    seed: int,
+) -> pd.DataFrame:
+    """
+    Run a full trading episode on a **specific DataFrame** (train or test).
+
+    Parameters
+    ----------
+    model : stable_baselines3.PPO
+        Trained PPO model (with or without sentiment).
+    use_sentiment : bool
+        ``True`` → include sentiment in observations; ``False`` → ignore it.
+    df : pd.DataFrame
+        Data slice to simulate on. **Must have ``Date`` as index** and columns
+        ``['open','high','low','close','volume']`` (``sentiment`` optional).
+    initial_balance : float
+        Starting cash (e.g. 10 000 €).
+    window_size : int
+        Number of past days the agent remembers (1 for MLP, >1 for LSTM).
+    seed : int
+        Random seed for environment reset → reproducible simulations.
+
+    Returns
+    -------
+    pd.DataFrame
+        Index = original ``Date``; columns = ``['net_worth','action']``.
+        ``net_worth`` = cash + shares × current close price.
+        ``action`` = 0 (hold), 1 (buy all), 2 (sell all).
+
+    Notes
+    -----
+    * The environment is **re‑created** for every call → isolates train / test.
+    * No early termination: the loop runs over **all rows** of ``df``.
+    * Uses ``df.iloc[step]`` → safe even if the index is non‑sequential.
+    """
+    logger.info(
+        f"simulate() → {len(df)} rows | "
+        f"Date range: {df.index[0].date()} → {df.index[-1].date()} | "
+        f"Sentiment={'ON' if use_sentiment else 'OFF'}"
+    )
+
+    # ------------------------------------------------------------------ #
+    # 1. Build a fresh environment for the given slice
+    # ------------------------------------------------------------------ #
+    env = TradingEnv(
+        df=df,
+        use_sentiment=use_sentiment,
+        initial_balance=initial_balance,
+        window_size=window_size,
+    )
+    obs, _ = env.reset(seed=seed)
+
+    # ------------------------------------------------------------------ #
+    # 2. Prepare result container (keeps original Date index)
+    # ------------------------------------------------------------------ #
+    sim_df = pd.DataFrame(
+        index=df.index,
+        columns=["net_worth", "action"],
+        dtype=float,
+    )
+
+    # ------------------------------------------------------------------ #
+    # 3. Episode loop
+    # ------------------------------------------------------------------ #
+    for step in range(len(df)):
+        # ---- current market price (close of *this* day) ----------------
+        current_price = float(df.iloc[step]["close"])
+
+        # ---- portfolio value before the agent acts --------------------
+        net_worth = env.balance + env.shares_held * current_price
+
+        # ---- agent decides --------------------------------------------
+        action, _ = model.predict(obs, deterministic=False)
+        action = int(action.item()) if hasattr(action, "item") else int(action)
+
+        # ---- record state ---------------------------------------------
+        sim_df.loc[df.index[step], "net_worth"] = net_worth
+        sim_df.loc[df.index[step], "action"] = action
+
+        # ---- environment advances to the *next* day -------------------
+        obs, reward, terminated, truncated, _ = env.step(action)
+
+        # (no early break – we always want the full slice)
+
+    logger.info(f"Simulation finished → {len(sim_df)} rows")
+    return sim_df
+    
 # === HYPERPARAMETERS ===
 base_kwargs = {
     "learning_rate": config.get("ppo_lr", 0.0001),
@@ -129,58 +230,14 @@ ppo_specific = {
 }
 algo_kwargs = {**base_kwargs, **ppo_specific}
 
-def simulate(model, use_sentiment: bool) -> pd.DataFrame:
-        """
-        Simulate full episode using `step` as index.
-        - Price from df.iloc[step] → always safe
-        - env.step() uses current_step BEFORE increment
-        - Preserves original Date index
-        """
-        print(f"simulate() received df with {len(df)} rows")
-        print(f"Date range: {df.index[0]} → {df.index[-1]}")
-
-        # --- Pass df directly (Date as index) ---
-        env = TradingEnv(
-            df=df,
-            use_sentiment=use_sentiment,
-            initial_balance=initial_balance,
-            window_size=window_size
-        )
-        obs, _ = env.reset(seed=seed)
-        sim_df = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
-
-        for step in range(len(df)):
-            # --- Use `step` → always valid (0 to len(df)-1) ---
-            current_price = df.iloc[step]['close']
-            net_worth = env.balance + env.shares_held * current_price
-
-            # --- Predict action ---
-            action, _ = model.predict(obs, deterministic=False)
-            action = int(action.item()) if hasattr(action, 'item') else int(action)
-
-            # --- Record state ---
-            sim_df.loc[df.index[step], 'net_worth'] = net_worth
-            sim_df.loc[df.index[step], 'action'] = action
-
-            # --- Step environment ---
-            obs, reward, terminated, truncated, info = env.step(action)
-
-            # --- Optional: debug early termination ---
-            # if terminated or truncated:
-            #     print(f"Early end at step {step}: terminated={terminated}, truncated={truncated}")
-
-            # --- Break only at last step ---
-            if step == len(df) - 1:
-                break
-
-        print(f"Simulation completed: {len(sim_df)} rows")
-        return sim_df
 
 # === SINGLE RUN (replicates == 1) ===
 if replicates == 1:
     window_size = lstm_window if use_lstm else 1
-    env_with = TradingEnv(df, use_sentiment=True, initial_balance=initial_balance, window_size=window_size)
-    env_without = TradingEnv(df, use_sentiment=False, initial_balance=initial_balance, window_size=window_size)
+    
+    # Train on train_df
+    env_with = TradingEnv(train_df, use_sentiment=True, initial_balance=initial_balance, window_size=window_size)
+    env_without = TradingEnv(train_df, use_sentiment=False, initial_balance=initial_balance, window_size=window_size)
     vec_env_with = DummyVecEnv([lambda: env_with])
     vec_env_without = DummyVecEnv([lambda: env_without])
     
@@ -203,8 +260,9 @@ if replicates == 1:
     model_without.learn(total_timesteps=config["timesteps"])
     model_without.save(f"models/model_{'lstm' if use_lstm else 'mlp'}_without_sentiment")
   
-    sim_with = simulate(model_with, True)
-    sim_without = simulate(model_without, False)
+    # Evaluate on test_df
+    sim_with    = simulate(model_with,    True,  test_df, initial_balance, window_size, seed)
+    sim_without = simulate(model_without, False, test_df, initial_balance, window_size, seed)
 
     sharpe_with = calculate_sharpe_ratio(sim_with['net_worth'].values)
     sharpe_without = calculate_sharpe_ratio(sim_without['net_worth'].values)
@@ -232,8 +290,10 @@ else:
             torch.mps.manual_seed(rep_seed)
 
         window_size = lstm_window if use_lstm else 1
-        env_with = TradingEnv(df.reset_index(), True, initial_balance, window_size)
-        env_without = TradingEnv(df.reset_index(), False, initial_balance, window_size)
+        
+        # Train on train_df
+        env_with = TradingEnv(train_df, True, initial_balance, window_size)
+        env_without = TradingEnv(train_df, False, initial_balance, window_size)
         vec_env_with = DummyVecEnv([lambda: env_with])
         vec_env_without = DummyVecEnv([lambda: env_without])
 
@@ -251,9 +311,10 @@ else:
 
         model_with.learn(total_timesteps=config["timesteps"])
         model_without.learn(total_timesteps=config["timesteps"])
-
-        sim_with = simulate(model_with, True)
-        sim_without = simulate(model_without, False)
+        
+        # Evaluate on test_df
+        sim_with    = simulate(model_with,    True,  test_df, initial_balance, window_size, seed)
+        sim_without = simulate(model_without, False, test_df, initial_balance, window_size, seed)
 
         sharpe_with = calculate_sharpe_ratio(sim_with['net_worth'].values)
         sharpe_without = calculate_sharpe_ratio(sim_without['net_worth'].values)
