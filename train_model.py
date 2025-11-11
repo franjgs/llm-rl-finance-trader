@@ -14,12 +14,12 @@ import logging
 import torch
 import os
 import numpy as np
-from collections import Counter
+
 import random
 import time
 import hashlib
 from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
+
 from stable_baselines3.common.vec_env import DummyVecEnv
 from src.trading_env import TradingEnv
 from src.plot_utils import plot_results
@@ -132,11 +132,11 @@ algo_kwargs = {**base_kwargs, **ppo_specific}
 # === SINGLE RUN (replicates == 1) ===
 if replicates == 1:
     window_size = lstm_window if use_lstm else 1
-    env_with = TradingEnv(df.reset_index(), use_sentiment=True, initial_balance=initial_balance, window_size=window_size)
-    env_without = TradingEnv(df.reset_index(), use_sentiment=False, initial_balance=initial_balance, window_size=window_size)
+    env_with = TradingEnv(df, use_sentiment=True, initial_balance=initial_balance, window_size=window_size)
+    env_without = TradingEnv(df, use_sentiment=False, initial_balance=initial_balance, window_size=window_size)
     vec_env_with = DummyVecEnv([lambda: env_with])
     vec_env_without = DummyVecEnv([lambda: env_without])
-
+    
     if use_lstm:
         policy_kwargs = dict(
             features_extractor_class=CustomLstmPolicy,
@@ -148,33 +148,60 @@ if replicates == 1:
     else:
         model_with = PPO("MlpPolicy", vec_env_with, **algo_kwargs)
         model_without = PPO("MlpPolicy", vec_env_without, **algo_kwargs)
-
+    
     logger.info(f"Training {algo_name} {'+ LSTM' if use_lstm else ''} with sentiment")
     model_with.learn(total_timesteps=config["timesteps"])
     model_with.save(f"models/model_{'lstm' if use_lstm else 'mlp'}_with_sentiment")
-
     logger.info(f"Training {algo_name} {'+ LSTM' if use_lstm else ''} without sentiment")
     model_without.learn(total_timesteps=config["timesteps"])
     model_without.save(f"models/model_{'lstm' if use_lstm else 'mlp'}_without_sentiment")
-
-    def simulate(model, use_sentiment):
-        env = TradingEnv(df.reset_index(), use_sentiment=use_sentiment, initial_balance=initial_balance, window_size=window_size)
-        obs, _ = env.reset(seed=seed)
-        sim_df = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
-        for step in range(len(df)):
-            action, _ = model.predict(obs)
-            action = action.item()
-            obs, _, done, truncated, _ = env.step(action)
-            net_worth = env.balance + env.shares_held * df.iloc[step]['close']
-            date = df.index[step]
-            sim_df.loc[date, 'net_worth'] = net_worth
-            sim_df.loc[date, 'action'] = action
-            if done or truncated:
-                for md in df.index[step + 1:]:
-                    sim_df.loc[md, 'net_worth'] = net_worth
-                    sim_df.loc[md, 'action'] = 0
-                break
-        return sim_df
+  
+    def simulate(model, use_sentiment: bool) -> pd.DataFrame:
+            """
+            Simulate full episode using `step` as index.
+            - Price from df.iloc[step] → always safe
+            - env.step() uses current_step BEFORE increment
+            - Preserves original Date index
+            """
+            print(f"simulate() received df with {len(df)} rows")
+            print(f"Date range: {df.index[0]} → {df.index[-1]}")
+    
+            # --- Pass df directly (Date as index) ---
+            env = TradingEnv(
+                df=df,
+                use_sentiment=use_sentiment,
+                initial_balance=initial_balance,
+                window_size=window_size
+            )
+            obs, _ = env.reset(seed=seed)
+            sim_df = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
+    
+            for step in range(len(df)):
+                # --- Use `step` → always valid (0 to len(df)-1) ---
+                current_price = df.iloc[step]['close']
+                net_worth = env.balance + env.shares_held * current_price
+    
+                # --- Predict action ---
+                action, _ = model.predict(obs, deterministic=False)
+                action = int(action.item()) if hasattr(action, 'item') else int(action)
+    
+                # --- Record state ---
+                sim_df.loc[df.index[step], 'net_worth'] = net_worth
+                sim_df.loc[df.index[step], 'action'] = action
+    
+                # --- Step environment ---
+                obs, reward, terminated, truncated, info = env.step(action)
+    
+                # --- Optional: debug early termination ---
+                # if terminated or truncated:
+                #     print(f"Early end at step {step}: terminated={terminated}, truncated={truncated}")
+    
+                # --- Break only at last step ---
+                if step == len(df) - 1:
+                    break
+    
+            print(f"Simulation completed: {len(sim_df)} rows")
+            return sim_df
 
     sim_with = simulate(model_with, True)
     sim_without = simulate(model_without, False)
@@ -182,9 +209,11 @@ if replicates == 1:
     sharpe_with = calculate_sharpe_ratio(sim_with['net_worth'].values)
     sharpe_without = calculate_sharpe_ratio(sim_without['net_worth'].values)
 
-    plot_results(df, sim_with['net_worth'], sim_with['action'], sim_without['net_worth'], sim_without['action'],
-                 sharpe_with, sharpe_without, symbol, seed, use_lstm)
-
+    plot_results(
+        df, sim_with['net_worth'], sim_with['action'],
+        sim_without['net_worth'], sim_without['action'],
+        sharpe_with, sharpe_without, symbol, seed, use_lstm
+    )
 # === REPLICATION MODE ===
 else:
     logger.info(f"REPLICATION MODE: {replicates} runs")
@@ -196,7 +225,6 @@ else:
         rep_entropy = f"{time.time()}_{os.getpid()}_{rep}_{global_entropy_seed}".encode()
         rep_seed = int(hashlib.sha256(rep_entropy).hexdigest(), 16) % (2**32)
         logger.info(f"--- Replication {rep+1}/{replicates} | Seed: {rep_seed} ---")
-
         random.seed(rep_seed)
         np.random.seed(rep_seed)
         torch.manual_seed(rep_seed)
@@ -232,7 +260,6 @@ else:
         all_sharpe_with.append(sharpe_with)
         all_sharpe_without.append(sharpe_without)
 
-        # Save per-replicate
         rep_csv = f"results/replicates/{symbol}_rep_{rep+1:03d}_seed_{rep_seed}.csv"
         pd.DataFrame({
             "Date": df.index,
@@ -240,6 +267,5 @@ else:
             "Net_Worth_Without": sim_without['net_worth']
         }).to_csv(rep_csv, index=False)
 
-    # Summary
     logger.info(f"MEAN Sharpe (With): {np.mean(all_sharpe_with):.4f} ± {np.std(all_sharpe_with):.4f}")
     logger.info(f"MEAN Sharpe (Without): {np.mean(all_sharpe_without):.4f} ± {np.std(all_sharpe_without):.4f}")

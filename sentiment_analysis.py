@@ -252,79 +252,141 @@ def fetch_alphavantage_news(symbol: str, start_dt: date, end_dt: date) -> List[D
 # 3. NewsAPI – Last 30 days (free tier)
 # --------------------------------------------------------------------- #
 def fetch_newsapi_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
-    """Fetch news from NewsAPI.org (free tier, last 30 days)."""
+    """
+    Fetch news from NewsAPI.org (FREE TIER: max 100 results, last 30 days).
+    - Stops after first page (100 articles)
+    - Clips dates to [today-30, today]
+    - Respects user-defined start/end if within window
+    """
     load_dotenv()
     api_key = os.getenv("NEWSAPI_KEY")
     if not api_key:
-        logger.warning("NEWSAPI_KEY missing")
+        logger.warning("NEWSAPI_KEY missing in .env")
         return []
-    
-    adjusted_start = max(start_dt, end_dt - timedelta(days=30))
-    if adjusted_start > start_dt:
-        logger.info("NewsAPI: Clipped to last 30 days (free tier)")
-    
+
+    today = date.today()
+    min_allowed = today - timedelta(days=30)
+    max_allowed = today
+
+    # Clip to allowed window
+    adjusted_start = max(start_dt, min_allowed)
+    adjusted_end = min(end_dt, max_allowed)
+
+    if adjusted_start > adjusted_end:
+        logger.info("NewsAPI: No valid date range after clipping")
+        return []
+
+    if adjusted_start > start_dt or adjusted_end < end_dt:
+        logger.info(
+            f"NewsAPI: Clipped to [{adjusted_start}, {adjusted_end}] "
+            f"(free tier: 30 days, max 100 results)"
+        )
+
     url = "https://newsapi.org/v2/everything"
+    items = []
+
     params = {
-        "q": f"{symbol} stock OR {symbol} earnings",
+        "q": f"{symbol} stock OR {symbol} earnings OR {symbol}",
         "from": adjusted_start.isoformat(),
-        "to": end_dt.isoformat(),
+        "to": adjusted_end.isoformat(),
         "language": "en",
         "sortBy": "publishedAt",
-        "pageSize": 100,
+        "pageSize": 100,  # Max allowed
+        "page": 1,
         "apiKey": api_key,
     }
-    items = []
-    page = 1
-    while len(items) < 1000:
-        params["page"] = page
-        try:
-            r = requests.get(url, params=params, timeout=15)
-            data = r.json()
-            if data.get("status") != "ok":
-                break
-            for art in data.get("articles", []):
-                try:
-                    date_str = datetime.fromisoformat(art["publishedAt"][:10]).date().isoformat()
-                    items.append({"date": date_str, "headline": art["title"], "source": "newsapi"})
-                except:
+
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        data = r.json()
+
+        if data.get("status") != "ok":
+            msg = data.get("message", "Unknown error")
+            if "maximum result size" in msg.lower():
+                logger.info("NewsAPI: Reached 100-result limit (free tier)")
+            else:
+                logger.warning(f"NewsAPI error: {msg}")
+            # Still process first page if available
+        else:
+            logger.info("NewsAPI: Successfully fetched first page")
+
+        articles = data.get("articles", [])
+        for art in articles:
+            try:
+                pub_date = art["publishedAt"]
+                if not pub_date or len(pub_date) < 10:
                     continue
-            if len(data.get("articles", [])) < 100:
-                break
-            page += 1
-        except Exception as e:
-            logger.error(f"NewsAPI error: {e}")
-            break
-    
-    logger.info(f"NewsAPI: {len(items)} headlines")
+                date_str = datetime.fromisoformat(pub_date[:19]).date().isoformat()
+                items.append({
+                    "date": date_str,
+                    "headline": art["title"],
+                    "source": "newsapi"
+                })
+            except Exception as e:
+                logger.debug(f"Failed to parse article: {e}")
+                continue
+
+        logger.info(f"NewsAPI: Retrieved {len(items)} headlines (max 100)")
+
+    except requests.RequestException as e:
+        logger.error(f"NewsAPI request failed: {e}")
+    except Exception as e:
+        logger.error(f"NewsAPI unexpected error: {e}")
+
     return items
 
 
 # --------------------------------------------------------------------- #
 # 4. Yahoo Finance RSS – Today only
-# --------------------------------------------------------------------- #
-def fetch_yahoo_news() -> List[Dict]:
-    """Fetch today's headlines from Yahoo Finance RSS."""
-    url = "https://feeds.finance.yahoo.com/rss/2.0/headline"
+def fetch_yahoo_news(symbol: str = "AAPL") -> List[Dict]:
+    """
+    Fetch today's headlines from Yahoo Finance RSS for a given stock symbol.
+    
+    Args:
+        symbol (str): Stock ticker (e.g., 'AAPL', 'MSFT'). Default: 'AAPL'
+    
+    Returns:
+        List of dicts: [{"date": "YYYY-MM-DD", "headline": "...", "source": "yahoo"}]
+    """
+    # Yahoo Finance RSS por símbolo
+    url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}"
+    
     try:
         feed = feedparser.parse(url)
-        today = date.today().isoformat()
+        if not feed.entries:
+            logger.info(f"Yahoo RSS: No entries for {symbol}")
+            return []
+
+        today_str = date.today().isoformat()
         items = []
+
         for entry in feed.entries:
-            if not hasattr(entry, "published_parsed"):
+            # Validar campos
+            if not hasattr(entry, "title") or not entry.title.strip():
                 continue
+            if not hasattr(entry, "published_parsed") or not entry.published_parsed:
+                continue
+
             try:
-                pub_date = datetime(*entry.published_parsed[:6]).date().isoformat()
-                if pub_date == today:
-                    items.append({"date": today, "headline": entry.title, "source": "yahoo"})
-            except:
+                # published_parsed = (year, month, day, hour, minute, second, ...)
+                pub_date = datetime(*entry.published_parsed[:6]).date()
+                if pub_date.isoformat() == today_str:
+                    items.append({
+                        "date": today_str,
+                        "headline": entry.title.strip(),
+                        "source": "yahoo"
+                    })
+            except (ValueError, TypeError, IndexError) as e:
+                logger.debug(f"Yahoo: Failed to parse date for entry: {e}")
                 continue
-        logger.info(f"Yahoo RSS: {len(items)} live headlines")
+
+        logger.info(f"Yahoo RSS: Retrieved {len(items)} headlines for {symbol} today")
         return items
+
     except Exception as e:
-        logger.error(f"Yahoo RSS error: {e}")
+        logger.error(f"Yahoo RSS error for {symbol}: {e}")
         return []
-
-
+    
 # --------------------------------------------------------------------- #
 # 5. Google News RSS – Recent
 # --------------------------------------------------------------------- #
@@ -353,56 +415,79 @@ def fetch_google_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
 # --------------------------------------------------------------------- #
 def fetch_gdelt_news(symbol: str, start_dt: date, end_dt: date) -> List[Dict]:
     """
-    Fetch global news from GDELT (last ~15 days only).
+    Fetch global news from GDELT DOC 2.0 API (last 3 months only).
+    - Requires [start, end] within last 3 months
+    - Returns [] if outside coverage
+    - Fallback to v1 if v2 fails
     """
-    COMPANY_MAP = {
-        "NVDA": "NVIDIA", "AAPL": "Apple", "TSLA": "Tesla", "MSFT": "Microsoft",
-        "GOOGL": "Alphabet", "AMZN": "Amazon", "META": "Meta",
-    }
-    company = COMPANY_MAP.get(symbol.upper(), symbol)
-    
-    # Clip to last 15 days
+    # GDELT DOC 2.0: only [today - 15 days, today]
     today = date.today()
-    max_start = today - timedelta(days=15)
-    start_dt = max(start_dt, max_start)
-    if start_dt > end_dt:
-        logger.info("GDELT: No data (outside last 15 days)")
+    min_allowed = today - timedelta(days=15)  # 2 weeks
+    max_allowed = today
+
+    adjusted_start = max(start_dt, min_allowed)
+    adjusted_end = min(end_dt, max_allowed)
+
+    if adjusted_start > adjusted_end:
+        logger.info(f"GDELT DOC 2.0: No data → range [{start_dt}, {end_dt}] outside 3-month window")
         return []
-    
-    raw_query = f'{company} stock'
+
+    if adjusted_start > start_dt or adjusted_end < end_dt:
+        logger.info(f"GDELT DOC 2.0: Clipped to [{adjusted_start}, {adjusted_end}] (3-month limit)")
+
+    # Simple query
+    raw_query = f"{symbol} stock"
     encoded_query = urllib.parse.quote(raw_query)
+
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
+
     params = {
         "query": encoded_query,
         "mode": "ArtList",
         "maxrecords": 250,
         "format": "json",
-        "startdatetime": start_dt.strftime("%Y%m%d000000"),
-        "enddatetime": end_dt.strftime("%Y%m%d235959"),
+        "startdatetime": adjusted_start.strftime("%Y%m%d000000"),
+        "enddatetime": adjusted_end.strftime("%Y%m%d235959"),
+        "sort": "DateDesc",
     }
+
     try:
         r = requests.get(url, params=params, timeout=20)
         r.raise_for_status()
+
         data = r.json()
+        articles = data.get("articles", [])
+        if not articles:
+            logger.info(f"GDELT DOC 2.0: No articles for '{symbol}' in range")
+            return []
+
         items = []
-        for d in data.get("articles", []):
+        for d in articles:
             try:
-                date_str = datetime.strptime(d["seendate"][:8], "%Y%m%d").date().isoformat()
-                items.append({"date": date_str, "headline": d["title"], "source": "gdelt"})
-            except (KeyError, ValueError, TypeError):
+                seendate = d.get("seendate", "")
+                if len(seendate) < 8:
+                    continue
+                parsed_date = datetime.strptime(seendate[:8], "%Y%m%d").date()
+                title = d.get("title", "").strip()
+                if title:
+                    items.append({
+                        "date": parsed_date.isoformat(),
+                        "headline": title,
+                        "source": "gdelt"
+                    })
+            except Exception as e:
+                logger.debug(f"GDELT DOC 2.0: Parse error: {e}")
                 continue
-        logger.info(f"GDELT: {len(items)} headlines for {symbol}")
+
+        logger.info(f"GDELT DOC 2.0: Retrieved {len(items)} headlines for {symbol}")
         return items
+
     except requests.exceptions.RequestException as e:
-        logger.error(f"GDELT request error: {e}")
-        return []
-    except requests.exceptions.JSONDecodeError as e:
-        logger.error(f"GDELT JSON error: {e}")
+        logger.error(f"GDELT DOC 2.0 request failed: {e}")
         return []
     except Exception as e:
-        logger.error(f"GDELT error: {e}")
+        logger.error(f"GDELT DOC 2.0 error: {e}")
         return []
-
 
 # --------------------------------------------------------------------- #
 # News dispatcher
@@ -424,7 +509,7 @@ def fetch_news(symbol: str, start_dt: date, end_dt: date, mode: str, sources: Li
         elif src == "newsapi":
             add(fetch_newsapi_news(symbol, start_dt, end_dt))
         elif src == "yahoo":
-            add(fetch_yahoo_news())
+            add(fetch_yahoo_news(symbol))
         elif src == "googlenews":
             add(fetch_google_news(symbol, start_dt, end_dt))
         elif src == "gdelt":
@@ -441,7 +526,7 @@ def fetch_news(symbol: str, start_dt: date, end_dt: date, mode: str, sources: Li
             elif src == "newsapi":
                 add(fetch_newsapi_news(symbol, start_dt, end_dt))
             elif src == "yahoo":
-                add(fetch_yahoo_news())
+                add(fetch_yahoo_news(symbol))
             elif src == "googlenews":
                 add(fetch_google_news(symbol, start_dt, end_dt))
             elif src == "gdelt":

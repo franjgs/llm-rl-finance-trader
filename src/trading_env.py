@@ -1,17 +1,17 @@
-# src/trading_env.py
 """
 Gymnasium-compatible trading environment.
 
 Features
 --------
-- Discrete actions: 0=hold, 1=buy, 2=sell
+- Discrete actions: 0=hold, 1=buy (all cash), 2=sell (all shares)
 - Optional sentiment feature
 - Configurable initial balance
-- Windowed observations for LSTM (window_size > 1)
-- Robust reset/step with index safety
+- Windowed observations (window_size > 1) for LSTM
+- Preserves original Date index (no reset_index)
+- Handles optional 'news' column (filled with '')
+- Safe indexing with assertions
 - Compatible with Stable-Baselines3 + LSTM policy
 """
-
 import gymnasium as gym
 import numpy as np
 import pandas as pd
@@ -27,7 +27,7 @@ class TradingEnv(gym.Env):
     Observation
     -----------
     - window_size == 1 → [open, high, low, close, volume, (sentiment)]
-    - window_size > 1 → stacked history of above (shape: (window_size, n_features))
+    - window_size > 1 → stacked history (shape: (window_size, n_features))
 
     Action Space
     ------------
@@ -40,7 +40,6 @@ class TradingEnv(gym.Env):
     ------
     Profit from sell actions only.
     """
-
     metadata = {"render_modes": ["human"]}
 
     def __init__(
@@ -56,9 +55,9 @@ class TradingEnv(gym.Env):
         Parameters
         ----------
         df : pd.DataFrame
-            Must contain columns: ['Date', 'open', 'high', 'low', 'close', 'volume']
-            Optional: 'sentiment'
-            Index will be ignored; Date used for logging only.
+            Must have 'Date' as index and columns:
+            ['open', 'high', 'low', 'close', 'volume']
+            Optional: 'sentiment', 'news'
         use_sentiment : bool
             Include sentiment in observation if available.
         initial_balance : float
@@ -68,33 +67,58 @@ class TradingEnv(gym.Env):
         """
         super().__init__()
 
-        if "Date" not in df.columns:
-            raise ValueError("DataFrame must have 'Date' column")
-        if not {"open", "high", "low", "close", "volume"}.issubset(df.columns):
-            raise ValueError("DataFrame missing required price/volume columns")
+        # --- 1. Validate and preserve Date index ---
+        if df.index.name != "Date":
+            if "Date" in df.columns:
+                df = df.set_index("Date")
+            else:
+                raise ValueError("df must have 'Date' as index or column")
 
-        # Clean and reset
-        self.df = df.dropna().reset_index(drop=True)
-        if len(self.df) == 0:
-            raise ValueError("DataFrame is empty after dropping NaN")
+        required_cols = {"open", "high", "low", "close", "volume"}
+        if not required_cols.issubset(df.columns):
+            raise ValueError(f"Missing required columns: {required_cols - set(df.columns)}")
 
+        self.original_df = df.copy()
+        self.df = df.copy()
+
+        # --- 2. Clean data safely (no reset_index) ---
+        # Fill 'news' with empty string
+        if "news" in self.df.columns:
+            self.df["news"] = self.df["news"].fillna("")
+
+        # Fill 'sentiment' with 0.0
+        if "sentiment" in self.df.columns:
+            self.df["sentiment"] = self.df["sentiment"].fillna(0.0)
+
+        # Forward/backward fill price/volume columns
+        price_cols = ["open", "high", "low", "close", "volume"]
+        self.df[price_cols] = self.df[price_cols].ffill().bfill()
+
+        # Final dropna (should keep all rows now)
+        # before = len(self.df)
+        self.df = self.df.dropna().copy()
+        after = len(self.df)
+        if after == 0:
+            raise ValueError("DataFrame is empty after cleaning")
+        # print(f"TradingEnv: {before} → {after} rows after cleaning")  # Debug
+
+        # --- 3. Config ---
         self.use_sentiment = use_sentiment and "sentiment" in self.df.columns
         self.initial_balance = float(initial_balance)
         self.window_size = int(window_size)
 
-        # State
+        # --- 4. State ---
         self.balance: float = self.initial_balance
         self.shares_held: float = 0.0
         self.current_step: int = 0
-        self.max_steps: int = len(self.df) - 1
 
-        # Features per step
+        # --- 5. Features ---
         self.feature_cols = ["open", "high", "low", "close", "volume"]
         if self.use_sentiment:
             self.feature_cols.append("sentiment")
         self.n_features = len(self.feature_cols)
 
-        # Observation space
+        # --- 6. Observation space ---
         if self.window_size == 1:
             self.observation_space = spaces.Box(
                 low=-np.inf, high=np.inf, shape=(self.n_features,), dtype=np.float32
@@ -106,29 +130,20 @@ class TradingEnv(gym.Env):
 
         self.action_space = spaces.Discrete(3)
 
-        # History buffer for windowed obs
+        # --- 7. History buffer ---
         self.window_buffer: deque[np.ndarray] = deque(maxlen=self.window_size)
 
     def reset(
         self, seed: Optional[int] = None, options: Optional[Dict] = None
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """
-        Reset environment to initial state.
-
-        Returns
-        -------
-        obs : np.ndarray
-            Initial observation.
-        info : dict
-            Empty info dict.
-        """
+        """Reset environment to initial state."""
         super().reset(seed=seed)
         self.current_step = 0
         self.balance = self.initial_balance
         self.shares_held = 0.0
         self.window_buffer.clear()
 
-        # Initialize buffer with first row(s)
+        # Initialize buffer
         first_row = self.df.iloc[0]
         first_obs = np.array([first_row[col] for col in self.feature_cols], dtype=np.float32)
 
@@ -152,40 +167,39 @@ class TradingEnv(gym.Env):
     def step(self, action) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
         Execute one time step.
-
-        Parameters
-        ----------
-        action : int
-            0=hold, 1=buy, 2=sell
-
-        Returns
-        -------
-        obs, reward, terminated, truncated, info
+        - Uses self.current_step BEFORE increment
+        - Safe indexing with assertion
         """
         if not self.action_space.contains(action):
             raise ValueError(f"Invalid action: {action}")
 
+        # --- 1. Use current_step BEFORE increment ---
+        assert self.current_step < len(self.df), (
+            f"current_step {self.current_step} out of bounds (len(df)={len(self.df)})"
+        )
         current_price = float(self.df.iloc[self.current_step]["close"])
         reward = 0.0
 
+        # --- 2. Execute action ---
         if action == 1:  # Buy
             shares_to_buy = self.balance // current_price
             cost = shares_to_buy * current_price
             self.shares_held += shares_to_buy
             self.balance -= cost
-
         elif action == 2:  # Sell
             revenue = self.shares_held * current_price
             self.balance += revenue
-            reward = revenue  # Reward = profit from selling
+            reward = revenue
             self.shares_held = 0.0
 
-        # Advance step
+        # --- 3. Advance step AFTER using price ---
         self.current_step += 1
-        terminated = self.current_step >= self.max_steps
+
+        # --- 4. Termination ---
+        terminated = self.current_step >= len(self.df)
         truncated = False
 
-        # Update observation buffer
+        # --- 5. Update observation buffer ---
         if self.current_step < len(self.df):
             row = self.df.iloc[self.current_step]
             obs_vec = np.array([row[col] for col in self.feature_cols], dtype=np.float32)
@@ -197,11 +211,19 @@ class TradingEnv(gym.Env):
         """Render current state (console only)."""
         if mode != "human":
             return
-        price = self.df.iloc[self.current_step]["close"]
+        price = (
+            self.df.iloc[self.current_step - 1]["close"]
+            if self.current_step > 0
+            else self.df.iloc[0]["close"]
+        )
         net_worth = self.balance + self.shares_held * price
-        print(f"Step: {self.current_step} | Price: {price:,.2f} | "
-              f"Shares: {self.shares_held} | Balance: ${self.balance:,.2f} | "
-              f"Net Worth: ${net_worth:,.2f}")
+        print(
+            f"Step: {self.current_step:3d} | "
+            f"Price: {price:8.2f} | "
+            f"Shares: {self.shares_held:6.2f} | "
+            f"Balance: ${self.balance:10.2f} | "
+            f"Net Worth: ${net_worth:10.2f}"
+        )
 
     def close(self) -> None:
         """Cleanup (no-op)."""

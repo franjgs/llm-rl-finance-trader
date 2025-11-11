@@ -4,23 +4,23 @@
 verbose: 0
 
 # Stock symbol to analyze
-# stock_symbol: NVDA      # ← Sentiment's king in 2025
+stock_symbol: NVDA      # ← Sentiment's king in 2025
 # Other top options:
-# stock_symbol: TSLA
-# stock_symbol: META
-# stock_symbol: GOOGL
+stock_symbol: TSLA
+stock_symbol: META
+stock_symbol: GOOGL
 stock_symbol: AAPL
-# stock_symbol: MSFT
-# stock_symbol: AMD
+stock_symbol: MSFT
+stock_symbol: AMD
 
 # Initial trading capital
 initial_balance: 10000
 
 # Date range for historical data
-start_date: "2023-11-16"
-end_date: "2024-11-10"
-# start_date: "2024-11-06"
-# end_date: "2025-11-05"
+# start_date: "2023-11-16"
+# end_date: "2024-11-10"
+start_date: "2024-11-01"
+end_date: "2025-11-10"
 
 # Directory paths
 raw_dir: data/raw
@@ -28,7 +28,7 @@ processed_dir: data/processed
 cache_dir: data/cache
 
 # Sentiment configuration
-sentiment_mode: individual   # "individual" or "combined"
+sentiment_mode: combined   # "individual" or "combined"
 sentiment_sources:         # Used only when mode == "combined"
   - alphavantage
   - newsapi
@@ -81,4 +81,4 @@ lstm_hidden_size: 64    # hidden size
 seed: null
 
 # Experimental setup
-replicates: 1  # 1 = single run, >1 = replication mode
+replicates: 3  # 1 = single run, >1 = replication mode
