@@ -15,6 +15,7 @@ stock_symbol: AMD
 
 # Initial trading capital
 initial_balance: 10000
+commission: 0.001   # 0.1 % 
 
 # Date range for historical data
 # start_date: "2023-11-16"

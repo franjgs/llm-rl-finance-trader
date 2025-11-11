@@ -129,6 +129,53 @@ ppo_specific = {
 }
 algo_kwargs = {**base_kwargs, **ppo_specific}
 
+def simulate(model, use_sentiment: bool) -> pd.DataFrame:
+        """
+        Simulate full episode using `step` as index.
+        - Price from df.iloc[step] → always safe
+        - env.step() uses current_step BEFORE increment
+        - Preserves original Date index
+        """
+        print(f"simulate() received df with {len(df)} rows")
+        print(f"Date range: {df.index[0]} → {df.index[-1]}")
+
+        # --- Pass df directly (Date as index) ---
+        env = TradingEnv(
+            df=df,
+            use_sentiment=use_sentiment,
+            initial_balance=initial_balance,
+            window_size=window_size
+        )
+        obs, _ = env.reset(seed=seed)
+        sim_df = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
+
+        for step in range(len(df)):
+            # --- Use `step` → always valid (0 to len(df)-1) ---
+            current_price = df.iloc[step]['close']
+            net_worth = env.balance + env.shares_held * current_price
+
+            # --- Predict action ---
+            action, _ = model.predict(obs, deterministic=False)
+            action = int(action.item()) if hasattr(action, 'item') else int(action)
+
+            # --- Record state ---
+            sim_df.loc[df.index[step], 'net_worth'] = net_worth
+            sim_df.loc[df.index[step], 'action'] = action
+
+            # --- Step environment ---
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            # --- Optional: debug early termination ---
+            # if terminated or truncated:
+            #     print(f"Early end at step {step}: terminated={terminated}, truncated={truncated}")
+
+            # --- Break only at last step ---
+            if step == len(df) - 1:
+                break
+
+        print(f"Simulation completed: {len(sim_df)} rows")
+        return sim_df
+
 # === SINGLE RUN (replicates == 1) ===
 if replicates == 1:
     window_size = lstm_window if use_lstm else 1
@@ -156,53 +203,6 @@ if replicates == 1:
     model_without.learn(total_timesteps=config["timesteps"])
     model_without.save(f"models/model_{'lstm' if use_lstm else 'mlp'}_without_sentiment")
   
-    def simulate(model, use_sentiment: bool) -> pd.DataFrame:
-            """
-            Simulate full episode using `step` as index.
-            - Price from df.iloc[step] → always safe
-            - env.step() uses current_step BEFORE increment
-            - Preserves original Date index
-            """
-            print(f"simulate() received df with {len(df)} rows")
-            print(f"Date range: {df.index[0]} → {df.index[-1]}")
-    
-            # --- Pass df directly (Date as index) ---
-            env = TradingEnv(
-                df=df,
-                use_sentiment=use_sentiment,
-                initial_balance=initial_balance,
-                window_size=window_size
-            )
-            obs, _ = env.reset(seed=seed)
-            sim_df = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
-    
-            for step in range(len(df)):
-                # --- Use `step` → always valid (0 to len(df)-1) ---
-                current_price = df.iloc[step]['close']
-                net_worth = env.balance + env.shares_held * current_price
-    
-                # --- Predict action ---
-                action, _ = model.predict(obs, deterministic=False)
-                action = int(action.item()) if hasattr(action, 'item') else int(action)
-    
-                # --- Record state ---
-                sim_df.loc[df.index[step], 'net_worth'] = net_worth
-                sim_df.loc[df.index[step], 'action'] = action
-    
-                # --- Step environment ---
-                obs, reward, terminated, truncated, info = env.step(action)
-    
-                # --- Optional: debug early termination ---
-                # if terminated or truncated:
-                #     print(f"Early end at step {step}: terminated={terminated}, truncated={truncated}")
-    
-                # --- Break only at last step ---
-                if step == len(df) - 1:
-                    break
-    
-            print(f"Simulation completed: {len(sim_df)} rows")
-            return sim_df
-
     sim_with = simulate(model_with, True)
     sim_without = simulate(model_without, False)
 
