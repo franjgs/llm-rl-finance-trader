@@ -268,7 +268,7 @@ if replicates == 1:
     sharpe_without = calculate_sharpe_ratio(sim_without['net_worth'].values)
 
     plot_results(
-        df, sim_with['net_worth'], sim_with['action'],
+        test_df, sim_with['net_worth'], sim_with['action'],
         sim_without['net_worth'], sim_without['action'],
         sharpe_with, sharpe_without, symbol, seed, use_lstm
     )
@@ -323,10 +323,10 @@ else:
 
         rep_csv = f"results/replicates/{symbol}_rep_{rep+1:03d}_seed_{rep_seed}.csv"
         pd.DataFrame({
-            "Date": df.index,
+            "Date": test_df.index,
             "Net_Worth_With": sim_with['net_worth'],
             "Net_Worth_Without": sim_without['net_worth']
         }).to_csv(rep_csv, index=False)
 
-    logger.info(f"MEAN Sharpe (With): {np.mean(all_sharpe_with):.4f} ± {np.std(all_sharpe_with):.4f}")
-    logger.info(f"MEAN Sharpe (Without): {np.mean(all_sharpe_without):.4f} ± {np.std(all_sharpe_without):.4f}")
+    logger.info(f"TEST MEAN Sharpe (With): {np.mean(all_sharpe_with):.4f} ± {np.std(all_sharpe_with):.4f}")
+    logger.info(f"TEST MEAN Sharpe (Without): {np.mean(all_sharpe_without):.4f} ± {np.std(all_sharpe_without):.4f}")
