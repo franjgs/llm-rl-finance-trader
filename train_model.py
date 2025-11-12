@@ -217,7 +217,7 @@ def simulate(
     
 # === HYPERPARAMETERS ===
 base_kwargs = {
-    "learning_rate": config.get("ppo_lr", 0.0001),
+    "learning_rate": config.get("ppo_learning_rate", 0.0001),
     "gamma": config.get("ppo_gamma", 0.99),
     "seed": seed,
     "device": device,
@@ -232,103 +232,85 @@ ppo_specific = {
 }
 algo_kwargs = {**base_kwargs, **ppo_specific}
 
+# ---------------------------------------------------------------------------- #
+# Unified training loop for all replicates (including 1)
+# ---------------------------------------------------------------------------- #
+logger.info(f"Running {replicates} replicate(s)")
+os.makedirs("results/replicates", exist_ok=True)
 
-# === SINGLE RUN (replicates == 1) ===
-if replicates == 1:
+all_sharpe_with, all_sharpe_without = [], []
+
+for rep in range(replicates):
+    # --- independent seed for each replicate ---
+    rep_entropy = f"{time.time()}_{os.getpid()}_{rep}_{global_entropy_seed}".encode()
+    rep_seed = int(hashlib.sha256(rep_entropy).hexdigest(), 16) % (2**32)
+    random.seed(rep_seed)
+    np.random.seed(rep_seed)
+    torch.manual_seed(rep_seed)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(rep_seed)
+    logger.info(f"Replication {rep + 1}/{replicates} | Seed: {rep_seed}")
+
     window_size = lstm_window if use_lstm else 1
-    
-    # Train on train_df
-    env_with = TradingEnv(train_df, use_sentiment=True, initial_balance=initial_balance, window_size=window_size)
-    env_without = TradingEnv(train_df, use_sentiment=False, initial_balance=initial_balance, window_size=window_size)
-    vec_env_with = DummyVecEnv([lambda: env_with])
-    vec_env_without = DummyVecEnv([lambda: env_without])
-    
+
+    # --- environment setup ---
+    env_with = DummyVecEnv([lambda: TradingEnv(train_df, True, initial_balance, window_size)])
+    env_without = DummyVecEnv([lambda: TradingEnv(train_df, False, initial_balance, window_size)])
+
+    # --- model creation ---
     if use_lstm:
         policy_kwargs = dict(
             features_extractor_class=CustomLstmPolicy,
             features_extractor_kwargs=dict(lstm_hidden_size=lstm_hidden_size, n_lstm_layers=1),
-            net_arch=[]
+            net_arch=[],
         )
-        model_with = PPO("MlpPolicy", vec_env_with, policy_kwargs=policy_kwargs, **algo_kwargs)
-        model_without = PPO("MlpPolicy", vec_env_without, policy_kwargs=policy_kwargs, **algo_kwargs)
+        model_with = PPO("MlpPolicy", env_with, policy_kwargs=policy_kwargs, **algo_kwargs)
+        model_without = PPO("MlpPolicy", env_without, policy_kwargs=policy_kwargs, **algo_kwargs)
     else:
-        model_with = PPO("MlpPolicy", vec_env_with, **algo_kwargs)
-        model_without = PPO("MlpPolicy", vec_env_without, **algo_kwargs)
-    
+        model_with = PPO("MlpPolicy", env_with, **algo_kwargs)
+        model_without = PPO("MlpPolicy", env_without, **algo_kwargs)
+
+    # --- training ---
     logger.info(f"Training {algo_name} {'+ LSTM' if use_lstm else ''} with sentiment")
     model_with.learn(total_timesteps=config["timesteps"])
-    model_with.save(f"models/model_{'lstm' if use_lstm else 'mlp'}_with_sentiment")
     logger.info(f"Training {algo_name} {'+ LSTM' if use_lstm else ''} without sentiment")
     model_without.learn(total_timesteps=config["timesteps"])
-    model_without.save(f"models/model_{'lstm' if use_lstm else 'mlp'}_without_sentiment")
-  
-    # Evaluate on test_df
-    sim_with    = simulate(model_with,    True,  test_df, initial_balance, window_size, seed)
-    sim_without = simulate(model_without, False, test_df, initial_balance, window_size, seed)
 
-    sharpe_with = calculate_sharpe_ratio(sim_with['net_worth'].values)
-    sharpe_without = calculate_sharpe_ratio(sim_without['net_worth'].values)
+    # --- evaluation ---
+    sim_with = simulate(model_with, True, test_df, initial_balance, window_size, rep_seed)
+    sim_without = simulate(model_without, False, test_df, initial_balance, window_size, rep_seed)
 
-    plot_results(
-        test_df, sim_with['net_worth'], sim_with['action'],
-        sim_without['net_worth'], sim_without['action'],
-        sharpe_with, sharpe_without, symbol, seed, use_lstm
-    )
-# === REPLICATION MODE ===
-else:
-    logger.info(f"REPLICATION MODE: {replicates} runs")
-    os.makedirs("results/replicates", exist_ok=True)
-    all_sharpe_with = []
-    all_sharpe_without = []
+    sharpe_with = calculate_sharpe_ratio(sim_with["net_worth"].values)
+    sharpe_without = calculate_sharpe_ratio(sim_without["net_worth"].values)
+    all_sharpe_with.append(sharpe_with)
+    all_sharpe_without.append(sharpe_without)
 
-    for rep in range(replicates):
-        rep_entropy = f"{time.time()}_{os.getpid()}_{rep}_{global_entropy_seed}".encode()
-        rep_seed = int(hashlib.sha256(rep_entropy).hexdigest(), 16) % (2**32)
-        logger.info(f"--- Replication {rep+1}/{replicates} | Seed: {rep_seed} ---")
-        random.seed(rep_seed)
-        np.random.seed(rep_seed)
-        torch.manual_seed(rep_seed)
-        if torch.backends.mps.is_available():
-            torch.mps.manual_seed(rep_seed)
+    # --- save replicate results ---
+    rep_csv = f"results/replicates/{symbol}_rep_{rep + 1:03d}_seed_{rep_seed}.csv"
+    pd.DataFrame({
+        "Date": test_df.index,
+        "Net_Worth_With": sim_with["net_worth"],
+        "Net_Worth_Without": sim_without["net_worth"],
+    }).to_csv(rep_csv, index=False)
 
-        window_size = lstm_window if use_lstm else 1
-        
-        # Train on train_df
-        env_with = TradingEnv(train_df, True, initial_balance, window_size)
-        env_without = TradingEnv(train_df, False, initial_balance, window_size)
-        vec_env_with = DummyVecEnv([lambda: env_with])
-        vec_env_without = DummyVecEnv([lambda: env_without])
+# ---------------------------------------------------------------------------- #
+# Aggregate results and plot for last replicate
+# ---------------------------------------------------------------------------- #
+logger.info(
+    f"Sharpe WITH sentiment: {np.mean(all_sharpe_with):.4f} ± {np.std(all_sharpe_with):.4f}\n"
+    f"Sharpe WITHOUT sentiment: {np.mean(all_sharpe_without):.4f} ± {np.std(all_sharpe_without):.4f}"
+)
 
-        if use_lstm:
-            policy_kwargs = dict(
-                features_extractor_class=CustomLstmPolicy,
-                features_extractor_kwargs=dict(lstm_hidden_size=lstm_hidden_size, n_lstm_layers=1),
-                net_arch=[]
-            )
-            model_with = PPO("MlpPolicy", vec_env_with, policy_kwargs=policy_kwargs, **algo_kwargs)
-            model_without = PPO("MlpPolicy", vec_env_without, policy_kwargs=policy_kwargs, **algo_kwargs)
-        else:
-            model_with = PPO("MlpPolicy", vec_env_with, **algo_kwargs)
-            model_without = PPO("MlpPolicy", vec_env_without, **algo_kwargs)
-
-        model_with.learn(total_timesteps=config["timesteps"])
-        model_without.learn(total_timesteps=config["timesteps"])
-        
-        # Evaluate on test_df
-        sim_with    = simulate(model_with,    True,  test_df, initial_balance, window_size, seed)
-        sim_without = simulate(model_without, False, test_df, initial_balance, window_size, seed)
-
-        sharpe_with = calculate_sharpe_ratio(sim_with['net_worth'].values)
-        sharpe_without = calculate_sharpe_ratio(sim_without['net_worth'].values)
-        all_sharpe_with.append(sharpe_with)
-        all_sharpe_without.append(sharpe_without)
-
-        rep_csv = f"results/replicates/{symbol}_rep_{rep+1:03d}_seed_{rep_seed}.csv"
-        pd.DataFrame({
-            "Date": test_df.index,
-            "Net_Worth_With": sim_with['net_worth'],
-            "Net_Worth_Without": sim_without['net_worth']
-        }).to_csv(rep_csv, index=False)
-
-    logger.info(f"TEST MEAN Sharpe (With): {np.mean(all_sharpe_with):.4f} ± {np.std(all_sharpe_with):.4f}")
-    logger.info(f"TEST MEAN Sharpe (Without): {np.mean(all_sharpe_without):.4f} ± {np.std(all_sharpe_without):.4f}")
+# Plot results for the last replicate
+plot_results(
+    test_df,
+    sim_with["net_worth"],
+    sim_with["action"],
+    sim_without["net_worth"],
+    sim_without["action"],
+    all_sharpe_with[-1],
+    all_sharpe_without[-1],
+    symbol,
+    seed,
+    use_lstm,
+)

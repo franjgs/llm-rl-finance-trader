@@ -4,12 +4,12 @@
 verbose: 0
 
 # Stock symbol to analyze
-stock_symbol: NVDA      # ← Sentiment's king in 2025
+# stock_symbol: NVDA      # ← Sentiment's king in 2025
 # Other top options:
 # stock_symbol: TSLA
 # stock_symbol: META
-# stock_symbol: GOOGL
-# stock_symbol: AAPL
+ #stock_symbol: GOOGL
+stock_symbol: AAPL
 # stock_symbol: MSFT
 # stock_symbol: AMD
 
@@ -20,8 +20,8 @@ commission: 0.001   # 0.1 %
 # Date range for historical data
 # start_date: "2023-11-16"
 # end_date: "2024-11-10"
-start_date: "2024-11-01"
-end_date: "2025-11-10"
+start_date: "2023-11-01"
+end_date: "2025-11-11"
 
 # Directory paths
 raw_dir: data/raw
@@ -47,7 +47,7 @@ algo: PPO  # PPO, SAC, TD3, A2C
 timesteps: 10000
 
 # === PPO ===
-ppo_lr: 0.0001
+ppo_learning_rate: 0.0001
 ppo_n_steps: 256
 ppo_batch_size: 128
 ppo_gamma: 0.99
@@ -56,25 +56,25 @@ ppo_clip_range: 0.1
 ppo_ent_coef: 0.001
 
 # === SAC ===
-sac_buffer_size: 100000
+sac_buffer_size: 1000000
 sac_learning_starts: 1000
-sac_train_freq: 1
-sac_gradient_steps: 1
+sac_batch_size: 256
 sac_ent_coef: "auto"
 
 # === TD3 ===
-td3_buffer_size: 100000
+td3_buffer_size: 1000000
 td3_learning_starts: 1000
 td3_train_freq: 1
 td3_gradient_steps: 1
+td3_noise: 0.1
 
 # === A2C ===
 a2c_n_steps: 5
-a2c_gae_lambda: 1.0
+a2c_gamma: 0.99
 a2c_ent_coef: 0.01
 
 # === RL + LSTM ===
-use_lstm: true          # ← RL + LSTM
+use_lstm: false          # ← RL + LSTM
 lstm_window: 32         # memory steps
 lstm_hidden_size: 64    # hidden size
 
@@ -82,5 +82,5 @@ lstm_hidden_size: 64    # hidden size
 seed: null
 
 # Experimental setup
-train_test_split : 0.7  # Train / Test split (70 % / 30 %)
-replicates: 10  # 1 = single run, >1 = replication mode
+train_test_split : 0.9  # Train / Test split (70 % / 30 %)
+replicates: 5  # 1 = single run, >1 = replication mode
