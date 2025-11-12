@@ -29,6 +29,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def load_config(config_path):
+    """
+    Load the YAML configuration file.
+    Args:
+        config_path: Path to the YAML file.
+    Returns:
+        Dictionary with the parsed configuration.
+    Raises:
+        yaml.YAMLError: If the YAML is malformed.
+        Exception: For any other file-related error.
+    """
     try:
         with open(config_path, 'r') as f:
             content = f.read()
@@ -42,6 +52,13 @@ def load_config(config_path):
         raise
 
 def calculate_sharpe_ratio(net_worth):
+    """
+    Compute the annualized Sharpe ratio (risk-free rate = 0).
+    Args:
+        net_worth: Time series of portfolio net worth.
+    Returns:
+        Sharpe ratio. Returns 0.0 if the series is too short or has zero volatility.
+    """
     if len(net_worth) < 2:
         logger.warning("Net worth series too short to calculate Sharpe Ratio")
         return 0.0
