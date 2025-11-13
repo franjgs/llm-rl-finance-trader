@@ -102,7 +102,8 @@ The project runs sequentially through three main scripts defined in `configs/con
 ```
 llm-rl-finance-trader/
 ├── configs/                    # Configuration files
-│   └── config.yaml             # Project settings (stock symbol, dates, etc.)
+│   └─ config.yaml              # Project settings (stock symbol, dates, etc.)
+│   └─ config_walk_forward.yaml # Project settings (stock symbol, dates, etc.)
 ├── data/                       # Data storage
 │   ├── raw/                    # Raw stock data (e.g., AAPL.csv)
 │   └── processed/              # Processed data with sentiment (e.g., AAPL_sentiment.csv)
@@ -116,6 +117,7 @@ llm-rl-finance-trader/
 ├── data_fetch.py               # Fetches stock data
 ├── sentiment_analysis.py       # Computes sentiment from financial news
 ├── train_model.py              # Trains and evaluates RL trading model
+├── train_walk_forward.py       # Walk Forward RL trading model
 ├── .env                        # Environment variables (Finnhub API key)
 ├── requirements.txt            # Python dependencies
 └── README.md                   # Project documentation
