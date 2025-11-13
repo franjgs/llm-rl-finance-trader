@@ -1,4 +1,3 @@
-# train_model.py
 """
 Train PPO agents with/without sentiment using config_beta.yaml.
 Supports:
@@ -18,7 +17,8 @@ import numpy as np
 import random
 import time
 import hashlib
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC, TD3, A2C
+
 
 from stable_baselines3.common.vec_env import DummyVecEnv
 from src.trading_env import TradingEnv
@@ -103,21 +103,21 @@ entropy_str = f"{time.time()}_{os.getpid()}_{random.getrandbits(64)}"
 global_entropy_seed = int(hashlib.sha256(entropy_str.encode()).hexdigest(), 16) % (2**32)
 
 if args.random_seed:
-    seed = random.randint(0, 999999)
-    logger.info(f"CLI override → Using RANDOM seed: {seed}")
+    base_seed = random.randint(0, 999999)
+    logger.info(f"CLI override → Using RANDOM seed: {base_seed}")
 elif config_seed is None:
-    seed = random.randint(0, 999999)
-    logger.info(f"Config seed is null → Using RANDOM seed: {seed}")
+    base_seed = random.randint(0, 999999)
+    logger.info(f"Config seed is null → Using RANDOM seed: {base_seed}")
 else:
-    seed = config_seed
-    logger.info(f"Using FIXED seed from config: {seed}")
+    base_seed = config_seed
+    logger.info(f"Using FIXED seed from config: {base_seed}")
 
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
+random.seed(base_seed)
+np.random.seed(base_seed)
+torch.manual_seed(base_seed)
 if torch.backends.mps.is_available():
-    torch.mps.manual_seed(seed)
-
+    torch.mps.manual_seed(base_seed)
+    
 # === DATA PATH ===
 raw_csv = os.path.join(raw_dir, f"{symbol}_raw.csv")
 processed_csv = os.path.join(processed_dir, f"{symbol}_sentiment_{sentiment_source if sentiment_mode == 'individual' else 'combined'}.csv")
@@ -138,6 +138,15 @@ train_df = df.iloc[:split_idx].copy()
 test_df = df.iloc[split_idx:].copy()
 
 logger.info(f"TRAIN: {len(train_df)} days ({train_test_split*100:.0f}%) | TEST: {len(test_df)} days ({(1-train_test_split)*100:.0f}%)")
+# Log the actual date ranges for train and test sets
+train_start = train_df.index.min().strftime("%Y-%m-%d")
+train_end   = train_df.index.max().strftime("%Y-%m-%d")
+test_start  = test_df.index.min().strftime("%Y-%m-%d")
+test_end    = test_df.index.max().strftime("%Y-%m-%d")
+
+logger.info(f"TRAIN date range: {train_start} to {train_end}")
+logger.info(f"TEST  date range: {test_start} to {test_end}")
+
 
 # === SIMULATE FUNCTION (GLOBAL) ===
 def simulate(
@@ -232,33 +241,71 @@ def simulate(
     logger.info(f"Simulation finished → {len(sim_df)} rows")
     return sim_df
     
-# === HYPERPARAMETERS ===
-base_kwargs = {
-    "learning_rate": config.get("ppo_learning_rate", 0.0001),
-    "gamma": config.get("ppo_gamma", 0.99),
-    "seed": seed,
+
+# ---------------------------------------------------------------------------- #
+# Algorithm & hyper-parameter setup
+# ---------------------------------------------------------------------------- #
+common_kwargs = {
+    "seed": base_seed,
     "device": device,
     "verbose": verbose
 }
-ppo_specific = {
-    "n_steps": lstm_window if use_lstm else config.get("ppo_n_steps", 256),
-    "batch_size": lstm_window if use_lstm else config.get("ppo_batch_size", 128),
-    "gae_lambda": config.get("ppo_gae_lambda", 0.95),
-    "clip_range": config.get("ppo_clip_range", 0.1),
-    "ent_coef": config.get("ppo_ent_coef", 0.001)
-}
-algo_kwargs = {**base_kwargs, **ppo_specific}
 
-# ---------------------------------------------------------------------------- #
-# Unified training loop for all replicates (including 1)
-# ---------------------------------------------------------------------------- #
+if algo_name == "PPO":
+    AlgoClass = PPO
+    algo_kwargs = {
+        "learning_rate": config.get("ppo_learning_rate", 1e-4),
+        "gamma": config.get("ppo_gamma", 0.99),
+        "n_steps": (lstm_window if use_lstm else config.get("ppo_n_steps", 256)),
+        "batch_size": (lstm_window if use_lstm else config.get("ppo_batch_size", 128)),
+        "gae_lambda": config.get("ppo_gae_lambda", 0.95),
+        "clip_range": config.get("ppo_clip_range", 0.1),
+        "ent_coef": config.get("ppo_ent_coef", 0.001),
+        **common_kwargs
+    }
+elif algo_name == "SAC":
+    AlgoClass = SAC
+    algo_kwargs = {
+        "buffer_size": config.get("sac_buffer_size", 1000000),
+        "learning_starts": config.get("sac_learning_starts", 1000),
+        "batch_size": config.get("sac_batch_size", 256),
+        "ent_coef": config.get("sac_ent_coef", "auto"),
+        "learning_rate": config.get("ppo_learning_rate", 1e-4),
+        **common_kwargs
+    }
+elif algo_name == "TD3":
+    AlgoClass = TD3
+    algo_kwargs = {
+        "buffer_size": config.get("td3_buffer_size", 1000000),
+        "learning_starts": config.get("td3_learning_starts", 1000),
+        "train_freq": config.get("td3_train_freq", 1),
+        "gradient_steps": config.get("td3_gradient_steps", 1),
+        "learning_rate": config.get("ppo_learning_rate", 1e-4),
+        **common_kwargs
+    }
+elif algo_name == "A2C":
+    AlgoClass = A2C
+    algo_kwargs = {
+        "n_steps": config.get("a2c_n_steps", 5),
+        "gamma": config.get("a2c_gamma", 0.99),
+        "ent_coef": config.get("a2c_ent_coef", 0.01),
+        "learning_rate": config.get("ppo_learning_rate", 1e-4),
+        **common_kwargs
+    }
+else:
+    raise ValueError(f"Unknown algorithm: {algo_name}")
+
+logger.info(f"Selected algorithm: {algo_name} with params: {algo_kwargs}")
+
+
+# ------------------------------------------------------------------------- #
+# Unified training loop (for PPO, SAC, TD3, A2C)
+# ------------------------------------------------------------------------- #
 logger.info(f"Running {replicates} replicate(s)")
 os.makedirs("results/replicates", exist_ok=True)
-
 all_sharpe_with, all_sharpe_without = [], []
 
 for rep in range(replicates):
-    # --- independent seed for each replicate ---
     rep_entropy = f"{time.time()}_{os.getpid()}_{rep}_{global_entropy_seed}".encode()
     rep_seed = int(hashlib.sha256(rep_entropy).hexdigest(), 16) % (2**32)
     random.seed(rep_seed)
@@ -270,30 +317,29 @@ for rep in range(replicates):
 
     window_size = lstm_window if use_lstm else 1
 
-    # --- environment setup ---
     env_with = DummyVecEnv([lambda: TradingEnv(train_df, True, initial_balance, window_size)])
     env_without = DummyVecEnv([lambda: TradingEnv(train_df, False, initial_balance, window_size)])
 
-    # --- model creation ---
-    if use_lstm:
+    # --- Model creation ---
+    if algo_name == "PPO" and use_lstm:
         policy_kwargs = dict(
             features_extractor_class=CustomLstmPolicy,
             features_extractor_kwargs=dict(lstm_hidden_size=lstm_hidden_size, n_lstm_layers=1),
             net_arch=[],
         )
-        model_with = PPO("MlpPolicy", env_with, policy_kwargs=policy_kwargs, **algo_kwargs)
-        model_without = PPO("MlpPolicy", env_without, policy_kwargs=policy_kwargs, **algo_kwargs)
+        model_with = AlgoClass("MlpPolicy", env_with, policy_kwargs=policy_kwargs, **algo_kwargs)
+        model_without = AlgoClass("MlpPolicy", env_without, policy_kwargs=policy_kwargs, **algo_kwargs)
     else:
-        model_with = PPO("MlpPolicy", env_with, **algo_kwargs)
-        model_without = PPO("MlpPolicy", env_without, **algo_kwargs)
+        model_with = AlgoClass("MlpPolicy", env_with, **algo_kwargs)
+        model_without = AlgoClass("MlpPolicy", env_without, **algo_kwargs)
 
-    # --- training ---
+    # --- Training ---
     logger.info(f"Training {algo_name} {'+ LSTM' if use_lstm else ''} with sentiment")
     model_with.learn(total_timesteps=config["timesteps"])
     logger.info(f"Training {algo_name} {'+ LSTM' if use_lstm else ''} without sentiment")
     model_without.learn(total_timesteps=config["timesteps"])
 
-    # --- evaluation ---
+    # --- Evaluation ---
     sim_with = simulate(model_with, True, test_df, initial_balance, window_size, rep_seed)
     sim_without = simulate(model_without, False, test_df, initial_balance, window_size, rep_seed)
 
@@ -302,7 +348,6 @@ for rep in range(replicates):
     all_sharpe_with.append(sharpe_with)
     all_sharpe_without.append(sharpe_without)
 
-    # --- save replicate results ---
     rep_csv = f"results/replicates/{symbol}_rep_{rep + 1:03d}_seed_{rep_seed}.csv"
     pd.DataFrame({
         "Date": test_df.index,
@@ -310,15 +355,14 @@ for rep in range(replicates):
         "Net_Worth_Without": sim_without["net_worth"],
     }).to_csv(rep_csv, index=False)
 
-# ---------------------------------------------------------------------------- #
-# Aggregate results and plot for last replicate
-# ---------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------- #
+# Summary and plot
+# ------------------------------------------------------------------------- #
 logger.info(
     f"Sharpe WITH sentiment: {np.mean(all_sharpe_with):.4f} ± {np.std(all_sharpe_with):.4f}\n"
     f"Sharpe WITHOUT sentiment: {np.mean(all_sharpe_without):.4f} ± {np.std(all_sharpe_without):.4f}"
 )
 
-# Plot results for the last replicate
 plot_results(
     test_df,
     sim_with["net_worth"],
@@ -328,6 +372,6 @@ plot_results(
     all_sharpe_with[-1],
     all_sharpe_without[-1],
     symbol,
-    seed,
+    rep_seed,
     use_lstm,
 )
