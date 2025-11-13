@@ -11,6 +11,8 @@ Inspired by academic work on financial news-driven RL, this repository implement
 
 This repository serves as the core implementation for a TFG (Trabajo de Fin de Grado), emphasizing reproducibility, portability, and optimization for macOS (Apple Silicon MPS support).
 
+The project now supports **walk-forward training**, a realistic rolling-window approach for time-series data, to better simulate real-world trading and reduce overfitting.
+
 ---
 
 ## 🚀 Features
@@ -21,6 +23,13 @@ This repository serves as the core implementation for a TFG (Trabajo de Fin de G
     * **Baseline:** Uses only **Price and Volume** data.
     * **Enhanced:** Adds the daily **Sentiment Score** feature.
 * Performance evaluated using **Sharpe Ratio**, **Net Worth**, and **Drawdown**.
+
+### Walk-Forward Training
+* **Rolling-window optimization**: Trains on all historical data up to the current day, predicts the next 1 day, then advances.
+* **Warm start**: Loads the previous day's best model and incrementally trains (e.g., 1,000 timesteps per day after initial 20,000).
+* **Configurable sentiment**: "with", "without", or "both" for comparison.
+* **Speedup**: ~20× faster than full re-training each day.
+* **Real-world simulation**: Mimics daily trading with continuous learning from new data.
 
 ---
 
@@ -41,6 +50,11 @@ The project runs sequentially through three main scripts defined in `configs/con
 1.  **`data_fetch.py`**: Downloads historical stock data (e.g., AAPL) using `yfinance` based on the dates defined in the config. **Output**: `data/raw/<symbol>_raw.csv`.
 2.  **`sentiment_analysis.py`**: Fetches news, computes FinBERT sentiment, and joins the feature with the historical data. **Output**: `data/processed/<symbol>_sentiment_<source>.csv`.
 3.  **`train_model.py`**: Loads the enriched data, trains two PPO agents (with/without sentiment), simulates their performance, and generates the final comparison plot.
+4. **`train_walk_forward.py`**: Performs walk-forward training with warm-start and incremental learning. **Output**: 
+    * Daily best models in `models/best_walk_forward/`
+    * Learning curves in `results/walk_forward/`
+    * Final equity curves in `results/walk_forward/*_1day_with.csv` and `results/walk_forward/*_1day_without.csv`
+    * Final plot via `plot_results()` (walk-forward mode)
 
 ---
 
