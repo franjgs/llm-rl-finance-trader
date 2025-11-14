@@ -305,7 +305,7 @@ if actions_with is not None or actions_without is not None:
         action_df["RL + Sentiment"] = actions_with.reindex(index)
     if actions_without is not None:
         action_df["RL (No Sentiment)"] = actions_without.reindex(index)
-    action_df = action_df.fillna(method="ffill")
+    action_df = action_df.ffill().bfill()  # forward fill + backward fill → nunca NaN
 
     plt.figure(figsize=(14, 6))
     sns.heatmap(
