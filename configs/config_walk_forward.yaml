@@ -46,10 +46,13 @@ algo: PPO # PPO, SAC, TD3, A2C
 ppo_learning_rate: 0.0001
 ppo_n_steps: 256
 ppo_batch_size: 128
-ppo_gamma: 0.99
+ppo_gamma: 0.999    # gamma controls how much the agent values ​​future rewards relative to immediate rewards.
+                    # gamma ~ 0: The agent is short-sighted. They only care about the reward of the current day.
+                    # gamma ~ 1 The agent is forward-thinking, which encourages long-term gains
 ppo_gae_lambda: 0.95
 ppo_clip_range: 0.1
-ppo_ent_coef: 0.001
+ppo_ent_coef: 0.01  # A higher entropy coefficient encourages the agent to explore more actions 
+                    # (buying and selling) instead of stagnating in the safest action (holding).
 
 # === SAC ===
 sac_buffer_size: 1000000
@@ -78,11 +81,6 @@ lstm_hidden_size: 64
 # EXPERIMENTAL SETUP
 # =============================================================================
 seed: null # null = random, int = fixed
-timesteps: 20000  # ← Only on the first day
-
-# === WARM START (20× SPEEDUP) ===
-warm_start: true
-incremental_timesteps: 1000  # ← Steps per day after the first
 
 # === MODE: STATIC SPLIT OR WALK-FORWARD ===
 # walk_forward: true → walk-forward (1 day ahead)
@@ -91,6 +89,14 @@ walk_forward: true
 prediction_horizon: 1 # Only used in walk-forward
 # Only used when walk_forward: false
 train_test_split: 0.9 # 90% train, 10% test
+
+# === WARM START (20× SPEEDUP) ===
+min_train_days: 150
+warm_start: true
+timesteps: 10000  # ← Only on the first day
+incremental_timesteps: 3000  # ← Steps per day after the first
+
+
 # Replication (only in static mode)
 replicates: 1
 # Sentiment comparison mode

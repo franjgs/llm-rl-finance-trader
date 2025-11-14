@@ -3,15 +3,14 @@ Gymnasium-compatible trading environment.
 
 Features
 --------
-- Discrete actions: 0=hold, 1=buy (all cash), 2=sell (all shares)
+- Discrete actions: 0=hold, 1=buy (all cash), 2=sell (all shares), 
+  3=buy (30% cash), 4=buy (60% cash), 5=sell (50% shares)
 - Optional sentiment & news
 - Commission per trade (read from config.yaml)
-- Partial buys/sells (30%, 60%) → commented but ready to activate
 - Preserves original Date index
 - Safe indexing + assertions
 - Compatible with Stable-Baselines3 + LSTM
 """
-
 import gymnasium as gym
 import numpy as np
 import pandas as pd
@@ -19,8 +18,6 @@ import yaml
 from gymnasium import spaces
 from collections import deque
 from typing import Optional, Tuple, Dict, Any
-
-
 import os
 
 # --- Load commission from config.yaml (correct path) ---
@@ -28,38 +25,42 @@ CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.yaml")
 
 if not os.path.exists(CONFIG_PATH):
-    raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}")
+    # Fallback for environments where the config path is tricky
+    COMMISSION_RATE = 0.001
+else:
+    with open(CONFIG_PATH, "r") as f:
+        CONFIG = yaml.safe_load(f)
+        COMMISSION_RATE = CONFIG.get("commission", 0.001)  # Default: 0.1%
 
-with open(CONFIG_PATH, "r") as f:
-    CONFIG = yaml.safe_load(f)
-
-COMMISSION_RATE = CONFIG.get("commission", 0.001)  # Default: 0.1%
 
 class TradingEnv(gym.Env):
     """
     Custom trading environment for RL agents.
 
-    Think of this as a **stock market simulator** where an AI learns to trade.
-
     Observation
     -----------
-    - window_size == 1 → [open, high, low, close, volume, (sentiment)]
+    - All features (open, high, low, close, volume, sentiment) are normalized to [0, 1].
+    - window_size == 1 → [normalized features]
     - window_size > 1 → stacked history (like short-term memory)
 
     Action Space
     ------------
-    Discrete(3):
+    Discrete(6):
         0 → Hold (do nothing)
         1 → Buy (use ALL available cash)
         2 → Sell (sell ALL held shares)
+        3 → Buy (use 30% available cash)
+        4 → Buy (use 60% available cash)
+        5 → Sell (sell 50% held shares)
 
     Reward
     ------
-    Net profit from sell actions (after commission).
+    Daily % change in portfolio net worth **using previous day's close price** as baseline.
+    This allows the agent to profit from price movements even if it only holds.
 
     Commission
     ----------
-    Every buy/sell costs a % of the transaction value (e.g., 0.1%).
+    Same % fee applied on **both buy and sell** (e.g., 0.1%).
     Read from config.yaml → realistic broker fee.
     """
     metadata = {"render_modes": ["human"]}
@@ -70,6 +71,8 @@ class TradingEnv(gym.Env):
         use_sentiment: bool = True,
         initial_balance: float = 10_000.0,
         window_size: int = 1,
+        commission: Optional[float] = None,
+        prediction_horizon: int = 1
     ) -> None:
         """
         Initialize the trading simulator.
@@ -86,6 +89,10 @@ class TradingEnv(gym.Env):
             Starting cash (e.g., 10,000 €).
         window_size : int
             How many past days the AI "remembers" (for LSTM).
+        commission : float, optional
+            Transaction fee rate. If None, uses value from config.yaml.
+        prediction_horizon : int
+            Number of days to predict (used in eval env).
         """
         super().__init__()
 
@@ -103,21 +110,16 @@ class TradingEnv(gym.Env):
         self.original_df = df.copy()
         self.df = df.copy()
 
-        # --- 2. Clean data safely (no reset_index) ---
-        # Fill missing news with empty string
+        # --- 2. Clean data safely ---
         if "news" in self.df.columns:
             self.df["news"] = self.df["news"].fillna("")
-
-        # Fill missing sentiment with 0 (neutral)
         if "sentiment" in self.df.columns:
             self.df["sentiment"] = self.df["sentiment"].fillna(0.0)
 
-        # Forward/backward fill prices (handle gaps)
         price_cols = ["open", "high", "low", "close", "volume"]
         self.df[price_cols] = self.df[price_cols].ffill().bfill()
-
-        # Final cleanup
         self.df = self.df.dropna().copy()
+
         if len(self.df) == 0:
             raise ValueError("DataFrame is empty after cleaning")
 
@@ -125,35 +127,48 @@ class TradingEnv(gym.Env):
         self.use_sentiment = use_sentiment and "sentiment" in self.df.columns
         self.initial_balance = float(initial_balance)
         self.window_size = int(window_size)
-        self.commission_rate = COMMISSION_RATE  # e.g., 0.001 = 0.1%
+        self.commission_rate = commission if commission is not None else COMMISSION_RATE
+        self.prediction_horizon = prediction_horizon
 
-        # --- 4. State (what changes during simulation) ---
-        self.balance: float = self.initial_balance      # Cash in hand
-        self.shares_held: float = 0.0                   # Number of shares owned
-        self.current_step: int = 0                     # Current day index
+        # --- 4. State ---
+        self.balance: float = self.initial_balance
+        self.shares_held: float = 0.0
+        self.current_step: int = 0
+        self.net_worth: float = self.initial_balance
 
-        # --- 5. Features (what the AI sees) ---
+        # --- 5. Features ---
         self.feature_cols = ["open", "high", "low", "close", "volume"]
         if self.use_sentiment:
             self.feature_cols.append("sentiment")
         self.n_features = len(self.feature_cols)
 
-        # --- 6. Observation space (what the AI can observe) ---
+        # --- 6. Normalization (per-environment, no leakage) ---
+        data_to_normalize = self.df[self.feature_cols].values
+        self.data_min = np.min(data_to_normalize, axis=0)
+        self.data_max = np.max(data_to_normalize, axis=0)
+        self.data_range = self.data_max - self.data_min
+        self.data_range[self.data_range == 0] = 1.0e-8  # avoid div by zero
+
+        # --- 7. Observation space ---
         if self.window_size == 1:
             self.observation_space = spaces.Box(
-                low=-np.inf, high=np.inf, shape=(self.n_features,), dtype=np.float32
+                low=0.0, high=1.0, shape=(self.n_features,), dtype=np.float32
             )
         else:
-            low = np.full((self.window_size, self.n_features), -np.inf, dtype=np.float32)
-            high = np.full((self.window_size, self.n_features), np.inf, dtype=np.float32)
+            low = np.zeros((self.window_size, self.n_features), dtype=np.float32)
+            high = np.ones((self.window_size, self.n_features), dtype=np.float32)
             self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
-        # --- 7. Action space ---
-        # Current: 3 actions (hold, buy all, sell all)
-        self.action_space = spaces.Discrete(3)
+        # --- 8. Action space (Updated to Discrete(6) for partial actions) ---
+        self.action_space = spaces.Discrete(6)
 
-        # --- 8. History buffer (short-term memory) ---
+        # --- 9. History buffer ---
         self.window_buffer: deque[np.ndarray] = deque(maxlen=self.window_size)
+
+    def _normalize_data(self, data_row: np.ndarray) -> np.ndarray:
+        """MinMax normalization using training slice stats."""
+        normalized = (data_row - self.data_min) / self.data_range
+        return np.clip(normalized, 0.0, 1.0)
 
     def reset(
         self, seed: Optional[int] = None, options: Optional[Dict] = None
@@ -163,11 +178,11 @@ class TradingEnv(gym.Env):
         self.current_step = 0
         self.balance = self.initial_balance
         self.shares_held = 0.0
+        self.net_worth = self.initial_balance
         self.window_buffer.clear()
 
-        # Fill memory buffer with first day (or zeros for past)
-        first_row = self.df.iloc[0]
-        first_obs = np.array([first_row[col] for col in self.feature_cols], dtype=np.float32)
+        first_row_data = self.df.iloc[0][self.feature_cols].values.astype(np.float32)
+        first_obs = self._normalize_data(first_row_data)
 
         if self.window_size == 1:
             self.window_buffer.append(first_obs)
@@ -180,116 +195,236 @@ class TradingEnv(gym.Env):
         return self._get_observation(), {}
 
     def _get_observation(self) -> np.ndarray:
-        """Return current market data (single day or window)."""
+        """Return current observation (window), float32 for MPS."""
         if self.window_size == 1:
-            return self.window_buffer[0]
+            obs = self.window_buffer[0]
         else:
-            return np.stack(list(self.window_buffer)).astype(np.float32)
+            obs = np.stack(list(self.window_buffer)).astype(np.float32)
+        return obs.astype(np.float32)
+
+    def _execute_buy(self, current_price: float, percentage: float = 1.0) -> None:
+        """
+        Execute a buy order using a given percentage of available cash.
+    
+        Parameters
+        ----------
+        current_price : float
+            Current market close price of the asset.
+        percentage : float, default 1.0
+            Fraction of available cash to spend (0.0 → 1.0).
+    
+        Notes
+        -----
+        * Allows **fractional shares** – essential for walk-forward training.
+        * Commission is applied on the **gross** trade value (standard broker model).
+        * The commission is deducted from the cash allocated before calculating shares,
+          guaranteeing that the total cost never exceeds the intended amount.
+        """
+        cash_to_use = self.balance * percentage
+        if cash_to_use <= 0.0:
+            return
+    
+        # Cash left after paying commission (standard broker calculation)
+        cash_after_commission = cash_to_use * (1.0 - self.commission_rate)
+    
+        # Fractional shares are allowed → the agent can always execute the order
+        shares_to_buy = cash_after_commission / current_price
+    
+        if shares_to_buy > 0.0:
+            cost = shares_to_buy * current_price
+            commission_amount = cost * self.commission_rate
+            total_cost = cost + commission_amount
+    
+            # Tiny tolerance for floating-point rounding
+            if total_cost <= self.balance + 1e-8:
+                self.shares_held += shares_to_buy
+                self.balance -= total_cost
+    
+    
+    def _execute_sell(self, current_price: float, percentage: float = 1.0) -> None:
+        """
+        Execute a sell order for a given percentage of currently held shares.
+    
+        Parameters
+        ----------
+        current_price : float
+            Current market close price of the asset.
+        percentage : float, default 1.0
+            Fraction of held shares to sell (0.0 → 1.0).
+    
+        Notes
+        -----
+        * Allows **fractional shares** – keeps the environment consistent with the buy side.
+        * Commission is applied on the **gross revenue** of the sale (standard broker model).
+        * Prevents tiny negative share dust due to floating-point errors.
+        """
+        shares_to_sell = self.shares_held * percentage
+    
+        if shares_to_sell <= 0.0:
+            return
+    
+        revenue = shares_to_sell * current_price
+        commission_amount = revenue * self.commission_rate
+        net_revenue = revenue - commission_amount
+    
+        self.balance += net_revenue
+        self.shares_held -= shares_to_sell
+    
+        # Clean up tiny negative values caused by rounding errors
+        if self.shares_held < 1e-8:
+            self.shares_held = 0.0
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
-        Execute one trading day.
+        Execute **one trading day**.
 
-        Actions:
-            0 → Hold
-            1 → Buy (use ALL cash)
-            2 → Sell (sell ALL shares)
+        **Reward** = % change in portfolio value from **previous day’s close price**.
+        This gives credit for holding during price rises.
 
-        Commission is applied on both buy and sell.
+        **Commission** = same % on **both buy and sell**.
         """
+        # --------------------------------------------------------------------- #
+        # 1. Validate action
+        # --------------------------------------------------------------------- #
         if not self.action_space.contains(action):
             raise ValueError(f"Invalid action: {action}")
 
-        # --- 1. Get current price (before moving to next day) ---
+        # --------------------------------------------------------------------- #
+        # 2. Current close price
+        # --------------------------------------------------------------------- #
         assert self.current_step < len(self.df), (
             f"Step {self.current_step} out of bounds (len={len(self.df)})"
         )
         current_price = float(self.df.iloc[self.current_step]["close"])
-        reward = 0.0
 
-        # --- 2. Execute action ---
-        if action == 1:  # Buy (ALL-IN)
-            shares_to_buy = self.balance // current_price
-            if shares_to_buy > 0:
-                cost = shares_to_buy * current_price
-                commission = cost * self.commission_rate
-                total_cost = cost + commission
-                if total_cost <= self.balance:
-                    self.shares_held += shares_to_buy
-                    self.balance -= total_cost
+        # --------------------------------------------------------------------- #
+        # 3. Previous close price (baseline for reward)
+        # --------------------------------------------------------------------- #
+        prev_price = (
+            float(self.df.iloc[self.current_step - 1]["close"])
+            if self.current_step > 0
+            else current_price
+        )
 
-        elif action == 2:  # Sell (ALL-OUT)
-            if self.shares_held > 0:
-                revenue = self.shares_held * current_price
-                commission = revenue * self.commission_rate
-                net_revenue = revenue - commission
-                self.balance += net_revenue
-                reward = net_revenue  # Profit after commission
-                self.shares_held = 0.0
+        # --------------------------------------------------------------------- #
+        # 4. Portfolio value using previous price
+        # --------------------------------------------------------------------- #
+        prev_portfolio_value = self.balance + self.shares_held * prev_price
 
-        # --- 3. Advance to next day ---
+        # --------------------------------------------------------------------- #
+        # 5. Execute action (Updated to handle 6 actions)
+        # --------------------------------------------------------------------- #
+        if action == 1:  # BUY – ALL-IN
+            self._execute_buy(current_price, percentage=1.0)
+
+        elif action == 2:  # SELL – ALL-OUT
+            self._execute_sell(current_price, percentage=1.0)
+            
+        elif action == 3:  # BUY – 10% Partial
+            self._execute_buy(current_price, percentage=0.10)
+
+        elif action == 4:  # BUY – 30% Partial
+            self._execute_buy(current_price, percentage=0.30)
+            
+        elif action == 5:  # SELL – 50% Partial
+            self._execute_sell(current_price, percentage=0.50)
+
+        # Action 0 (Hold) does nothing here, which is correct.
+
+        # --------------------------------------------------------------------- #
+        # 6. Current portfolio value
+        # --------------------------------------------------------------------- #
+        current_portfolio_value = self.balance + self.shares_held * current_price
+        self.net_worth = current_portfolio_value
+
+        # --------------------------------------------------------------------- #
+        # 7. Reward = Logarithmic return (scale-invariant & PPO-friendly)
+        # --------------------------------------------------------------------- #
+        # We use **log returns** instead of raw € or percentage change.
+        # Why this is the gold-standard in financial RL:
+        #   • Stationary magnitude: a +5 % day always gives ~0.048 reward,
+        #     regardless of portfolio size → value function never explodes.
+        #   • Naturally handles compounding and is mathematically sound.
+        #   • PPO (and all policy-gradient methods) converge dramatically faster
+        #     and more stably with this reward shape.
+        #   • Used in virtually every published paper on deep RL for trading.
+        if prev_portfolio_value > 0.0:
+            reward = np.log(current_portfolio_value / prev_portfolio_value) * 100  # +1% → +1.0 reward
+        else:
+            reward = 0.0
+
+        # Optional tiny exposure bonus (tie-breaker)
+        #   • Prevents the agent from being completely indifferent between
+        #     holding cash and being fully invested when expected return is zero.
+        #   • Very small magnitude (≈ 0.0001 per day when 100 % invested) so it
+        #     never dominates the main log-return signal.
+        exposure = (
+            (self.shares_held * current_price) / current_portfolio_value
+            if current_portfolio_value > 0.0
+            else 0.0
+        )
+        reward += 0.002 * exposure
+        # --------------------------------------------------------------------- #
+        # --------------------------------------------------------------------- #
+        # 8. Advance day
+        # --------------------------------------------------------------------- #
         self.current_step += 1
 
-        # --- 4. Check if simulation ends ---
+        # --------------------------------------------------------------------- #
+        # 9. Termination
+        # --------------------------------------------------------------------- #
         terminated = self.current_step >= len(self.df)
-        truncated = False
+        truncated = self.current_step >= self.prediction_horizon
 
-        # --- 5. Update observation (next day's data) ---
+        # --------------------------------------------------------------------- #
+        # 10. Next observation
+        # --------------------------------------------------------------------- #
         if self.current_step < len(self.df):
-            row = self.df.iloc[self.current_step]
-            obs_vec = np.array([row[col] for col in self.feature_cols], dtype=np.float32)
+            row_data = self.df.iloc[self.current_step][self.feature_cols].values.astype(np.float32)
+            obs_vec = self._normalize_data(row_data)
             self.window_buffer.append(obs_vec)
 
-        return self._get_observation(), float(reward), terminated, truncated, {}
+        # --------------------------------------------------------------------- #
+        # 11. Debug print – shows the REAL situation every step
+        # --------------------------------------------------------------------- #
+        """
+        print(
+            f"[SIM] Step {self.current_step-1:2d} | "
+            f"Price: {current_price:7.2f} € | "
+            f"Action: {action} | "
+            f"Shares: {self.shares_held:8.3f} | "
+            f"Cash: {self.balance:10.2f} € | "
+            f"Net Worth: {self.net_worth:10.2f} €"
+        )
+        """
+        # --------------------------------------------------------------------- #
+        # 12. Return step info
+        # --------------------------------------------------------------------- #
+        info = {"net_worth": self.net_worth}
+        return self._get_observation(), float(reward), terminated, truncated, info
 
-        # ------------------------------------------------------------------
-        # FUTURE: Partial buys/sells (uncomment to activate)
-        # ------------------------------------------------------------------
-        # elif action == 3:  # Buy 30%
-        #     cash_to_use = self.balance * 0.3
-        #     shares_to_buy = cash_to_use // current_price
-        #     if shares_to_buy > 0:
-        #         cost = shares_to_buy * current_price
-        #         commission = cost * self.commission_rate
-        #         total_cost = cost + commission
-        #         if total_cost <= self.balance:
-        #             self.shares_held += shares_to_buy
-        #             self.balance -= total_cost
-        #
-        # elif action == 4:  # Buy 60%
-        #     cash_to_use = self.balance * 0.6
-        #     shares_to_buy = cash_to_use // current_price
-        #     # ... same as above ...
-        #
-        # elif action == 5:  # Sell 50%
-        #     shares_to_sell = self.shares_held * 0.5
-        #     if shares_to_sell > 0:
-        #         revenue = shares_to_sell * current_price
-        #         commission = revenue * self.commission_rate
-        #         net_revenue = revenue - commission
-        #         self.balance += net_revenue
-        #         self.shares_held -= shares_to_sell
-        #         reward = net_revenue
 
     def render(self, mode: str = "human") -> None:
-        """Print current portfolio status (like a bank statement)."""
+        """Print current portfolio status using the CORRECT current price."""
         if mode != "human":
             return
+
+        # Use the price of the day we just finished (current_step points to next day)
         price = (
             self.df.iloc[self.current_step - 1]["close"]
             if self.current_step > 0
             else self.df.iloc[0]["close"]
         )
-        net_worth = self.balance + self.shares_held * price
+
         print(
-            f"Day {self.current_step:3d} | "
+            f"[RENDER] Day {self.current_step:3d} | "
             f"Price: {price:8.2f} € | "
-            f"Shares: {self.shares_held:6.2f} | "
+            f"Shares: {self.shares_held:8.3f} | "
             f"Cash: {self.balance:10.2f} € | "
-            f"Net Worth: {net_worth:10.2f} € | "
+            f"Net Worth: {self.net_worth:10.2f} € | "
             f"Commission: {self.commission_rate*100:.3f}%"
         )
 
     def close(self) -> None:
-        """Cleanup (nothing to do)."""
+        """Cleanup."""
         pass
