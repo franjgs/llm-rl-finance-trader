@@ -181,12 +181,17 @@ logger.info(f"Walk-forward period: {start_date} to {end_date}")
 # Filter prices to match walk-forward period
 prices = prices.loc[start_date:end_date]
 
-# === Buy & Hold Benchmark (starts on first training day) ===
-first_train_date = prices.index[0]  # First day of walk-forward
-start_price = prices.iloc[0]
+# === Buy & Hold Benchmark (CORRECT: starts on first RL trading day) ===
+first_rl_date = all_dates.min()  # First day we have a net_worth value
+if first_rl_date not in prices.index:
+    # In case of weekend/holiday, use closest previous trading day
+    first_rl_date = prices.index[prices.index.get_loc(first_rl_date, method='nearest')]
+
+start_price = prices.loc[first_rl_date]
 shares = initial_balance / start_price
-bh = shares * prices
+bh = shares * prices.loc[first_rl_date:]
 bh.name = "Buy & Hold"
+logger.info(f"Buy & Hold starts on {first_rl_date.date()} at ${start_price:,.2f}")
 
 # Align all series to a common index
 index = all_dates.union(bh.index).sort_values()
@@ -196,6 +201,7 @@ if nw_with is not None:
     nw_with = nw_with.reindex(index).ffill()
 if nw_without is not None:
     nw_without = nw_without.reindex(index).ffill()
+    
 
 # =============================================================================
 # 4. PERFORMANCE METRICS

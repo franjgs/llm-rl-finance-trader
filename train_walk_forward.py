@@ -418,7 +418,7 @@ for pred_idx in range(start_idx, end_idx + 1):
                 window_size=window_size,
                 commission=commission
             )
-            return InfoRewardScaler(env, scale=1)
+            return InfoRewardScaler(env, scale=1e3)
 
         def make_eval_env():
             """
@@ -434,7 +434,7 @@ for pred_idx in range(start_idx, end_idx + 1):
                 commission=commission,
                 prediction_horizon=prediction_horizon
             )
-            env = InfoRewardScaler(env, scale=1)
+            env = InfoRewardScaler(env, scale=1e3)
             return CustomEvalMonitor(env)
 
         vec_train = DummyVecEnv([make_train_env])
