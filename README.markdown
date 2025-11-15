@@ -1,35 +1,31 @@
-# 📈 LLM-RL Finance Trader
+# LLM-RL Finance Trader + Statistical Ensemble
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
 ![Conda](https://img.shields.io/badge/Conda-llm_rl_finance-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Status](https://img.shields.io/badge/Status-In%20Progress-orange.svg)
+![Branch](https://img.shields.io/badge/branch-ensemble-success.svg)
 
-Welcome to **LLM-RL Finance Trader**, a hybrid research project that integrates static AI models (specifically, **FinBERT** for feature extraction) with dynamic **Reinforcement Learning (RL)** to optimize a trading strategy.
+Hybrid research repository that combines two state-of-the-art approaches:
 
-Inspired by academic work on financial news-driven RL, this repository implements a **PPO**-based agent to manage assets (e.g., AAPL) by comparing performance **with and without** an enhanced **sentiment feature**.
+- **main / develop** → Reinforcement Learning (PPO) + FinBERT sentiment (original TFG)
+- **ensemble** → Production-grade statistical + ML ensemble (momentum, volatility targeting, XGBoost, LSTM, sentiment signal, RL-style risk overlay)
 
-This repository serves as the core implementation for a TFG (Trabajo de Fin de Grado), emphasizing reproducibility, portability, and optimization for macOS (Apple Silicon MPS support).
-
-The project now supports **walk-forward training**, a realistic rolling-window approach for time-series data, to better simulate real-world trading and reduce overfitting.
+Both pipelines share the same data, sentiment engine and results folders, so you can compare RL vs. classical quant strategies on the exact same dataset.
 
 ---
 
-## 🚀 Features
+## 🚀 **Ensemble features**
 
-### 🧠 Reinforcement Learning (RL)
-* Trains a **PPO** agent (Stable-Baselines3) using a custom `TradingEnv`.
-* Compares two strategies:
-    * **Baseline:** Uses only **Price and Volume** data.
-    * **Enhanced:** Adds the daily **Sentiment Score** feature.
-* Performance evaluated using **Sharpe Ratio**, **Net Worth**, and **Drawdown**.
-
-### Walk-Forward Training
-* **Rolling-window optimization**: Trains on all historical data up to the current day, predicts the next 1 day, then advances.
-* **Warm start**: Loads the previous day's best model and incrementally trains (e.g., 1,000 timesteps per day after initial 20,000).
-* **Configurable sentiment**: "with", "without", or "both" for comparison.
-* **Speedup**: ~20× faster than full re-training each day.
-* **Real-world simulation**: Mimics daily trading with continuous learning from new data.
+### Core Components
+- Time-Series Momentum (Moskowitz, Ooi & Pedersen 2012)
+- Volatility Targeting & Risk-Parity scaling (Harvey & Liu 2015)
+- XGBoost tabular classifier
+- LSTM sequence predictor
+- Daily FinBERT sentiment signal (your existing pipeline, forward-filled)
+- RL-style dynamic risk overlay (drawdown-based exposure scaling)
+- Automatic day → bar conversion (1h, 30m, 15m, 5m, daily)
+- Realistic costs (commission + slippage)
+- Full metrics: Sharpe, CAGR, Max Drawdown, Outperformance vs Buy & Hold
 
 ---
 
@@ -49,12 +45,7 @@ The project runs sequentially through three main scripts defined in `configs/con
 
 1.  **`data_fetch.py`**: Downloads historical stock data (e.g., AAPL) using `yfinance` based on the dates defined in the config. **Output**: `data/raw/<symbol>_raw.csv`.
 2.  **`sentiment_analysis.py`**: Fetches news, computes FinBERT sentiment, and joins the feature with the historical data. **Output**: `data/processed/<symbol>_sentiment_<source>.csv`.
-3.  **`train_model.py`**: Loads the enriched data, trains two PPO agents (with/without sentiment), simulates their performance, and generates the final comparison plot.
-4. **`train_walk_forward.py`**: Performs walk-forward training with warm-start and incremental learning. **Output**: 
-    * Daily best models in `models/best_walk_forward/`
-    * Learning curves in `results/walk_forward/`
-    * Final equity curves in `results/walk_forward/*_1day_with.csv` and `results/walk_forward/*_1day_without.csv`
-    * Final plot via `plot_results()` (walk-forward mode)
+3.  **`ensemble.py`**: Loads the enriched data, trains 
 
 ---
 
@@ -101,26 +92,56 @@ The project runs sequentially through three main scripts defined in `configs/con
 
 ```
 llm-rl-finance-trader/
-├── configs/                    # Configuration files
-│   └─ config.yaml              # Project settings (stock symbol, dates, etc.)
-│   └─ config_walk_forward.yaml # Project settings (stock symbol, dates, etc.)
-├── data/                       # Data storage
-│   ├── raw/                    # Raw stock data (e.g., AAPL.csv)
-│   └── processed/              # Processed data with sentiment (e.g., AAPL_sentiment.csv)
-│   └── cache/                  # Cached news with sentiment (e.g., cache_AAPL.json)
-├── models/                     # Trained RL models
-├── results/                    # Output plots and results
-├── src/                        # Auxiliary modules
-│   └── trading_env.py          # Custom Gym environment for trading
-│   └── rl_utils.py		# Customize LSTM Policy
-│   └── plot_utils.py		# Plot Utils
-├── data_fetch.py               # Fetches stock data
-├── sentiment_analysis.py       # Computes sentiment from financial news
-├── train_model.py              # Trains and evaluates RL trading model
-├── train_walk_forward.py       # Walk Forward RL trading model
-├── .env                        # Environment variables (Finnhub API key)
-├── requirements.txt            # Python dependencies
-└── README.md                   # Project documentation
+├── configs/
+│   ├── config.yaml                  # Legacy RL config (maintained)
+│   ├── config_walk_forward.yaml     # Legacy walk-forward config
+│   └── config_ensemble.yaml         # NEW: Full ensemble configuration (English)
+│
+├── data/                            # All data (ignored via .gitignore)
+│   ├── raw/                         # Raw OHLCV from yfinance
+│   ├── processed/                   # Price + sentiment merged
+│   └── cache/                       # News cache + deduplicated headlines
+│
+├── models/                          # Trained models (ignored)
+│   ├── rl/                          # RL models (your original PPO)
+│   │   └── best_walk_forward/
+│   └── ensemble/                    # NEW: Statistical + ML models
+│       ├── xgb_ensemble.joblib
+│       └── lstm_ensemble.pth
+│
+├── results/                         # Plots and reports (committed only examples)
+│   ├── rl/                          # Original RL results
+│   └── ensemble/                    # NEW: Ensemble equity curves & reports
+│       └── NVDA_1h_ensemble_2025.png
+│
+├── src/
+│   ├── __init__.py
+│   ├── gen_utils.py                 # load_config() – shared
+│   ├── logging_config.py            # Centralized logging + verbose control
+│   ├── intraday_utils.py            # Day → bar auto-conversion
+│   ├── metrics.py                   # sharpe_ratio, max_drawdown, annualized_return
+│   ├── plot_utils.py                # Professional plotting (Spyder-ready)
+│   ├── features.py                  # Shared feature engineering
+│   ├── trading_env.py               # Original Gym environment (RL)
+│   │
+│   ├── ensemble_core.py             # Core ensemble pipeline
+│   └── models/                      # Ensemble model implementations
+│       ├── __init__.py
+│       ├── momentum.py
+│       ├── volatility_targeting.py
+│       ├── xgboost_model.py
+│       ├── lstm_model.py
+│       ├── sentiment_signal.py
+│       └── rl_risk_overlay.py
+│
+├── data_fetch.py                    # Enhanced: intraday + auto date adjust
+├── sentiment_analysis.py            # Unchanged – used by both RL and ensemble
+├── ensemble.py                      # NEW: Main ensemble script (no main(), Spyder-first)
+├── requirements.txt
+├── .env                             # API keys (gitignored)
+├── .gitignore
+├── README.md
+└── LICENSE                          # MIT
 ```
 
 ---
