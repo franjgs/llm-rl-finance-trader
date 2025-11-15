@@ -1,7 +1,7 @@
 # data_fetch.py
 # Run in Spyder → df, cfg, output_path, source
-# Output: <raw_dir>/<stock_symbol>_raw.csv
-# Fuente: yfinance (sin session manual) + fallback a Yahoo CSV
+# Output: <raw_dir>/<stock_symbol>_<interval>_raw.csv
+# Fuente: yfinance (sin session manual) + fallback a Yahoo CSV (solo para '1d')
 
 import argparse
 import yaml
@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import yfinance as yf
 import time
 import requests
+from io import StringIO
 
 # --------------------------------------------------------------------- #
 # Logging configuration
@@ -39,24 +40,27 @@ def load_config(path):
         raise
 
 # --------------------------------------------------------------------- #
-# 2. Fetch con yfinance (sin session manual)
+# 2. Fetch con yfinance (soporte para intervalos)
 # --------------------------------------------------------------------- #
-def fetch_yfinance(symbol, start_date, end_date):
+def fetch_yfinance(symbol, start_date, end_date, interval="1d"):
     """
     Fetch using yfinance with NO session. Let yfinance handle curl_cffi.
+    Supports daily ('1d') and intraday ('1h', '30m', etc.) intervals.
     """
+    # Ajustar la fecha final: yfinance descarga hasta el día ANTERIOR a end_dt
+    # Por ejemplo, si pido hasta '2025-11-12', descarga datos hasta el 11.
     end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
     end_str = end_dt.strftime("%Y-%m-%d")
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            logger.info(f"[yfinance] Attempt {attempt + 1}: {symbol} {start_date} → {end_date}")
+            logger.info(f"[yfinance] Attempt {attempt + 1}: {symbol} {start_date} → {end_date} (Interval: {interval})")
             df = yf.download(
                 tickers=symbol,
                 start=start_date,
                 end=end_str,
-                interval="1d",
+                interval=interval,  # <--- Nuevo intervalo
                 auto_adjust=True,
                 progress=False  # Silencia barra
                 # NO session=...
@@ -66,10 +70,24 @@ def fetch_yfinance(symbol, start_date, end_date):
                 time.sleep(3)
                 continue
 
-            df = df.reset_index()[["Date", "Open", "High", "Low", "Close", "Volume"]]
+            # El índice puede ser 'Datetime' para intradía o 'Date' para diario
+            df = df.reset_index()
+            
+            # Renombrar y seleccionar columnas
+            # En intradía, la columna de fecha se llama 'Datetime'. La tratamos igual.
+            date_col = 'Datetime' if 'Datetime' in df.columns else 'Date'
+            
+            df = df[[date_col, "Open", "High", "Low", "Close", "Volume"]]
             df.columns = ["Date", "open", "high", "low", "close", "volume"]
-            df["Date"] = pd.to_datetime(df["Date"]).dt.date
-            logger.info(f"[yfinance] Success: {len(df)} rows")
+            
+            # Convertir a formato de fecha/hora adecuado
+            # Para intradía, queremos mantener la hora, por lo que no usamos .dt.date
+            if interval == "1d":
+                df["Date"] = pd.to_datetime(df["Date"]).dt.date
+            else:
+                df["Date"] = pd.to_datetime(df["Date"]) 
+
+            logger.info(f"[yfinance] Success: {len(df)} rows. First date: {df['Date'].iloc[0]}")
             return df, "yfinance"
 
         except Exception as e:
@@ -82,11 +100,12 @@ def fetch_yfinance(symbol, start_date, end_date):
     return None, "yfinance"
 
 # --------------------------------------------------------------------- #
-# 3. Fallback: Yahoo CSV directo (si yfinance sigue fallando)
+# 3. Fallback: Yahoo CSV directo (SOLO para '1d' de manera fiable)
 # --------------------------------------------------------------------- #
 def fetch_yahoo_csv(symbol, start_date, end_date):
     """
     Direct CSV download from Yahoo (bypass yfinance entirely).
+    This method is only reliable for daily ('1d') intervals.
     """
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
     end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
@@ -96,7 +115,7 @@ def fetch_yahoo_csv(symbol, start_date, end_date):
     params = {
         "period1": start_ts,
         "period2": end_ts,
-        "interval": "1d",
+        "interval": "1d", # <--- Fijo a '1d'
         "events": "history",
         "includeAdjustedClose": "true"
     }
@@ -107,13 +126,13 @@ def fetch_yahoo_csv(symbol, start_date, end_date):
     })
 
     try:
-        logger.info(f"[Yahoo CSV] Fetching {symbol}...")
+        logger.info(f"[Yahoo CSV] Fetching {symbol} (interval: 1d)...")
         response = session.get(url, params=params, timeout=15)
         if response.status_code != 200:
             logger.error(f"[Yahoo CSV] HTTP {response.status_code}")
             return None, "Yahoo CSV"
 
-        df = pd.read_csv(pd.compat.StringIO(response.text))
+        df = pd.read_csv(StringIO(response.text))
         if df.empty:
             return None, "Yahoo CSV"
 
@@ -130,14 +149,18 @@ def fetch_yahoo_csv(symbol, start_date, end_date):
 # --------------------------------------------------------------------- #
 # 4. Main fetcher
 # --------------------------------------------------------------------- #
-def fetch_stock_data(symbol, start_date, end_date, cfg):
-    # 1. yfinance (sin session)
-    df, source = fetch_yfinance(symbol, start_date, end_date)
+def fetch_stock_data(symbol, start_date, end_date, interval, cfg):
+    # 1. yfinance (con intervalo dinámico)
+    df, source = fetch_yfinance(symbol, start_date, end_date, interval)
     if df is not None:
         return df, source
 
-    # 2. Fallback: CSV directo
-    logger.warning("yfinance failed. Trying direct CSV...")
+    # 2. Fallback: CSV directo (solo si interval es '1d')
+    if interval != "1d":
+        logger.error(f"yfinance failed for interval {interval}. Direct CSV fallback only supports '1d' reliably. Giving up.")
+        raise ValueError(f"Failed to fetch {symbol} at interval {interval}. yfinance failed.")
+
+    logger.warning("yfinance failed for '1d'. Trying direct CSV...")
     df, source = fetch_yahoo_csv(symbol, start_date, end_date)
     if df is not None:
         return df, source
@@ -155,9 +178,14 @@ args = parser.parse_args()  # ← ¡AHORA SÍ!
 cfg = load_config(args.config)
 symbol = cfg["stock_symbol"]
 raw_dir = cfg["raw_dir"]
-output_path = f"{raw_dir}/{symbol}_raw.csv"
+# Nuevo: Leer el intervalo desde la configuración, por defecto '1d'
+interval = cfg.get("data_interval", "1d")
 
-df, source = fetch_stock_data(symbol, cfg["start_date"], cfg["end_date"], cfg)
+# Nuevo: Incluir el intervalo en el nombre del archivo de salida
+output_path = f"{raw_dir}/{symbol}_{interval}_raw.csv"
+
+# Pasar el nuevo argumento
+df, source = fetch_stock_data(symbol, cfg["start_date"], cfg["end_date"], interval, cfg)
 
 os.makedirs(raw_dir, exist_ok=True)
 df.to_csv(output_path, index=False)

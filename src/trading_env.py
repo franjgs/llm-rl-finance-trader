@@ -363,7 +363,7 @@ class TradingEnv(gym.Env):
             if current_portfolio_value > 0.0
             else 0.0
         )
-        reward += 0.002 * exposure
+        reward += 0.003 * exposure
         # --------------------------------------------------------------------- #
         # --------------------------------------------------------------------- #
         # 8. Advance day

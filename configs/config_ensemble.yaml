@@ -1,0 +1,108 @@
+# configs/config_ensemble.yaml
+# Configuration file exclusively for the statistical + ML ensemble (non-RL)
+# Fully compatible with your existing structure and development workflow (Spyder)
+# Updated: November 15, 2025
+
+# ===================================================================
+# GENERAL SETTINGS
+# ===================================================================
+verbose: 1                              # 0 = silent, 1 = normal, 2 = debug (shows INFO + DEBUG logs)
+stock_symbol: "NVDA"                    # Current king of sentiment-driven moves
+# stock_symbol: "TSLA"
+# stock_symbol: "AAPL"
+# stock_symbol: "META"
+
+data_interval: "1h"                     # "1d", "1h", "30m", "15m", "5m", "1m"
+start_date: "2020-01-01"
+end_date: "2025-11-15"
+
+initial_balance: 1000000                # Starting capital for backtest
+commission_bps: 1.5                     # Realistic intraday commission (1.5 bps)
+slippage_bps: 2.0                       # Conservative slippage
+
+# ===================================================================
+# PATHS (same structure as your RL config)
+# ===================================================================
+paths:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  cache_dir: "data/cache"
+  models_dir: "models"
+  results_dir: "results"
+
+# ===================================================================
+# DATA & SENTIMENT
+# ===================================================================
+sentiment:
+  enabled: true
+  mode: "combined"                      # "combined" or "individual"
+  sources:
+    - finnhub
+    - alphavantage
+    - newsapi
+    - yahoo
+    - googlenews
+    - gdelt
+  model: "ProsusAI/finbert"
+  force_refresh: false
+
+# ===================================================================
+# ENSEMBLE MODELS (6 proven components)
+# ===================================================================
+ensemble:
+  momentum:
+    enabled: true
+    lookback_bars: 20  # Moskowitz et al. (2012) optimal window
+    vol_lookback_bars: 20
+    use_log_returns: true
+    target_vol: 0.02
+    max_exposure: 1.0
+    smoothing_alpha: 0.12
+    min_abs_mom: 0.0
+    fillna_method: ffill
+    return_raw: true
+
+  volatility_targeting:
+    enabled: true
+    target_vol: 0.20                    # 20% annualized (standard in intraday quant)
+    max_leverage: 3.0
+    vol_lookback_bars: 20
+    min_vol: 1e-4
+    max_scale: 4.0
+    return_raw: true
+
+  xgboost:
+    enabled: true
+    model_path: "models/xgb_ensemble.joblib"
+    retrain: false
+    prediction_horizon_hours: 8
+
+  lstm:
+    enabled: true
+    model_path: "models/lstm_ensemble.pth"
+    retrain: false
+    sequence_days: 60
+
+  sentiment_signal:
+    enabled: true
+    pos_threshold: 0.35
+    neg_threshold: -0.25
+
+  rl_risk_overlay:
+    enabled: true
+    drawdown_reduce_level: -0.08
+    drawdown_flat_level: -0.15
+    sharpe_boost_threshold: 1.2
+    sharpe_lookback_days: 60
+
+  weighting:
+    equal_risk: true                    # All signals contribute equally to risk
+    min_position_threshold: 0.05        # Below 5% → flat (reduces noise)
+
+# ===================================================================
+# LOGGING & DEBUG
+# ===================================================================
+logging:
+  level: "INFO"                         # Will be overridden by verbose flag
+  show_progress_bars: true
+  debug_features: false
