@@ -1,22 +1,27 @@
-# Core ML / RL
+# Core ML / Reinforcement Learning
 gymnasium==0.29.1
 stable-baselines3==2.3.2
-torch==2.4.1
+torch==2.4.1+cu121          # Use +cu121 for CUDA 12.1, or remove suffix for CPU-only
 
-# Transformers & Sentiment
+# Tree-based Gradient Boosting (required by your XGBoost ensemble component)
+xgboost==2.1.1              # Essential for XGBoostPredictor
+scikit-learn==1.5.2         # Required for joblib, TimeSeriesSplit, metrics, etc.
+
+# Transformers & Sentiment Analysis
 transformers==4.45.1
 finnhub-python==2.4.20
 
-# Data & Finance
+# Data handling & Financial data sources
 pandas==2.2.3
-yfinance
-pandas-datareader
+yfinance==0.2.44
+pandas-datareader==0.10.0
+numpy==2.1.2
 
-# Config & Env
+# Configuration & Environment
 python-dotenv==1.0.1
 pyyaml==6.0.2
 
-# Visualization & Dev
-matplotlib
-ipykernel
-ipywidgets
+# Visualization & Jupyter / Spyder development
+matplotlib==3.9.2
+ipykernel==6.29.5
+ipywidgets==8.1.5
