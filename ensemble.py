@@ -11,16 +11,16 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 
 # === Your existing utilities - keep interfaces stable ===
 from src.gen_utils import load_config
 from src.logging_config import setup_logging
 from src.intraday_utils import adjust_config_for_interval
-from src.ensemble_core import build_ensemble
 from src.metrics import sharpe_ratio, max_drawdown, annualized_return
 from src.plot_utils import plot_results
+
+from src.ensemble.ensemble_model import EnsembleModel
 
 # Optional auto-download
 try:
@@ -149,7 +149,8 @@ logger.info(f"Combined dataframe prepared ({len(df):,} rows). Columns: {list(df.
 logger.info("Building ensemble signals...")
 try:
     # build_ensemble should accept price+sentiment df and config; returns df with 'position' column in [-1..1] or discrete actions
-    final_df = build_ensemble(df.copy(), cfg)
+    ensemble = EnsembleModel(cfg)
+    final_df = ensemble.fit_predict(df, equity_curve=None)
     if not isinstance(final_df, pd.DataFrame):
         raise TypeError("build_ensemble must return a pandas.DataFrame")
 except Exception as e:
