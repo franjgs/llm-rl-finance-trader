@@ -13,7 +13,7 @@ stock_symbol: "NVDA"                    # Current king of sentiment-driven moves
 # stock_symbol: "META"
 
 data_interval: "1h"                     # "1d", "1h", "30m", "15m", "5m", "1m"
-start_date: "2020-01-01"
+start_date: "2023-12-01"
 end_date: "2025-11-15"
 
 initial_balance: 1000000                # Starting capital for backtest
@@ -72,7 +72,7 @@ ensemble:
     return_raw: true
 
   xgboost:
-      enabled: true
+      enabled: false
       model_path: "models/xgb_ensemble.joblib"
       retrain: false
     
@@ -110,7 +110,7 @@ ensemble:
       output_type: "class"               # "class" or "proba"
 
   lstm:
-      enabled: true
+      enabled: false
       model_path: "models/lstm_ensemble.pth"
       retrain: false
     

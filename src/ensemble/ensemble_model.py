@@ -119,7 +119,7 @@ class EnsembleModel:
         )
 
         # 6. Volatility Targeting
-        if self.vol_target86_enabled:
+        if self.vol_target_enabled:
             df["clean_signal"] = df["clean_signal"]  # ensure column exists
             df = apply_vol_target(df, self.ensemble_cfg["volatility_targeting"])
 
