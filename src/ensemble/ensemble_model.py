@@ -27,7 +27,7 @@ from typing import Dict, Any, List, Optional
 # Import all models with correct current names
 from src.models.momentum import generate_momentum_signal
 from src.models.volatility_targeting import apply_vol_target
-from src.models.xgboost_predictor import XGBoostPredictor  # ← tu clase
+from src.models.xgboost_model import XGBoostPredictor  
 from src.models.lstm_model import LSTMPredictor
 from src.models.sentiment_signal import SentimentSignal
 from src.models.rl_risk_overlay import RLRiskOverlay
