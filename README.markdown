@@ -93,55 +93,54 @@ The project runs sequentially through three main scripts defined in `configs/con
 ```
 llm-rl-finance-trader/
 ├── configs/
-│   ├── config.yaml                  # Legacy RL config (maintained)
-│   ├── config_walk_forward.yaml     # Legacy walk-forward config
-│   └── config_ensemble.yaml         # NEW: Full ensemble configuration (English)
-│
-├── data/                            # All data (ignored via .gitignore)
-│   ├── raw/                         # Raw OHLCV from yfinance
-│   ├── processed/                   # Price + sentiment merged
-│   └── cache/                       # News cache + deduplicated headlines
-│
-├── models/                          # Trained models (ignored)
-│   ├── rl/                          # RL models (your original PPO)
+│   ├── config.yaml                     # Legacy RL config (kept for compatibility)
+│   ├── config_walk_forward.yaml        # Legacy walk-forward config
+│   └── config_ensemble.yaml            # Main ensemble configuration (active)
+├── data/                               # All data (ignored via .gitignore)
+│   ├── raw/
+│   ├── processed/
+│   └── cache/
+├── models/                             # Trained models (ignored via .gitignore)
+│   ├── rl/
 │   │   └── best_walk_forward/
-│   └── ensemble/                    # NEW: Statistical + ML models
+│   └── ensemble/                       # Statistical + ML models
 │       ├── xgb_ensemble.joblib
 │       └── lstm_ensemble.pth
-│
-├── results/                         # Plots and reports (committed only examples)
-│   ├── rl/                          # Original RL results
-│   └── ensemble/                    # NEW: Ensemble equity curves & reports
+├── results/                            # Plots and reports
+│   ├── rl/
+│   └── ensemble/
 │       └── NVDA_1h_ensemble_2025.png
-│
 ├── src/
 │   ├── __init__.py
-│   ├── gen_utils.py                 # load_config() – shared
-│   ├── logging_config.py            # Centralized logging + verbose control
-│   ├── intraday_utils.py            # Day → bar auto-conversion
-│   ├── metrics.py                   # sharpe_ratio, max_drawdown, annualized_return
-│   ├── plot_utils.py                # Professional plotting (Spyder-ready)
-│   ├── features.py                  # Shared feature engineering
-│   ├── trading_env.py               # Original Gym environment (RL)
+│   ├── gen_utils.py                    # load_config(), shared utilities
+│   ├── logging_config.py               # Centralized logging
+│   ├── intraday_utils.py               # Intraday utilities
+│   ├── metrics.py                      # Performance metrics
+│   ├── plot_utils.py                   # Plotting utilities
+│   ├── features.py                     # Shared feature engineering
+│   ├── trading_env.py                  # Original Gym environment (RL)
 │   │
-│   ├── ensemble_core.py             # Core ensemble pipeline
-│   └── models/                      # Ensemble model implementations
+│   ├── ensemble/                       # NEW: Unified ensemble module
+│   │   ├── __init__.py
+│   │   └── ensemble_model.py           # Single source of truth: replaces ensemble_core.py
+│   │
+│   └── models/                         # Individual model implementations
 │       ├── __init__.py
 │       ├── momentum.py
 │       ├── volatility_targeting.py
-│       ├── xgboost_model.py
+│       ├── xgboost_model.py            # or xgboost_predictor.py
 │       ├── lstm_model.py
 │       ├── sentiment_signal.py
 │       └── rl_risk_overlay.py
-│
-├── data_fetch.py                    # Enhanced: intraday + auto date adjust
-├── sentiment_analysis.py            # Unchanged – used by both RL and ensemble
-├── ensemble.py                      # NEW: Main ensemble script (no main(), Spyder-first)
+
+├── data_fetch.py                       # Enhanced data downloader
+├── sentiment_analysis.py               # Sentiment pipeline (shared)
+├── ensemble.py                         # Main execution script (Spyder-first, no main())
 ├── requirements.txt
-├── .env                             # API keys (gitignored)
+├── .env                                # API keys (gitignored)
 ├── .gitignore
 ├── README.md
-└── LICENSE                          # MIT
+└── LICENSE                             # MIT
 ```
 
 ---
