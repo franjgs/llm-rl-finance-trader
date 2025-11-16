@@ -15,10 +15,18 @@ dist/
 Icon
 ._*
 
-# Project directories
+# Project directories (MODIFIED)
+# ----------------------------------------------------
+# 1. Ignore large output/generated data folders.
 data/
-models/
 results/
+# 2. Ignore trained models and logs (the large files).
+# This prevents uploading large files like zipped SB3 models and TensorBoard logs.
+models/best_walk_forward/
+logs/
+# NOTE: By ignoring 'models/best_walk_forward/' but not 'models/', 
+# the source code files in 'src/models' WILL be uploaded.
+# ----------------------------------------------------
 
 # Jupyter
 .ipynb_checkpoints/
@@ -35,6 +43,5 @@ conda-bld/
 .vscode/
 .idea/
 .env
-data/cache/    
+data/cache/
 .cache/
-logs/

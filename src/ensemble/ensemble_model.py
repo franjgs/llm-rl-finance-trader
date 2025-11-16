@@ -1,8 +1,7 @@
 # src/ensemble/ensemble_model.py
 """
-Spanish Quant Ensemble 2025 – Unified Model
+Ensemble 2025 – Unified Model
 Date: November 16, 2025
-Status: COMPLETE. PROFESSIONAL. UNSTOPPABLE.
 
 Integrates:
 - Momentum (Moskowitz 2012)

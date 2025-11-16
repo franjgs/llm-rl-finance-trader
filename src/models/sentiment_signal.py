@@ -33,29 +33,49 @@ class SentimentSignal:
     # ---------------------------------------------------------
 
     def apply(self, df):
+        """
+        Compute sentiment-based trading signal using thresholds,
+        optional normalization, smoothing and class/raw output modes.
+        """
         if "sentiment" not in df.columns:
             df["signal_sentiment"] = np.nan
             return df
 
         sent = df["sentiment"].astype(float).fillna(0)
 
-        # optional normalization
+        # Optional normalization
         if self.normalize:
             sent = self._normalize(sent)
 
-        # basic long/short/neutral rule
-        signal = np.where(sent > self.pos_threshold, 1,
-                 np.where(sent < self.neg_threshold, -0.5, 0))
+        # Basic long/short/neutral rule
+        signal = np.where(
+            sent > self.pos_threshold, 1,
+            np.where(sent < self.neg_threshold, -0.5, 0)
+        )
 
-        # smoothing
-        smoothed = pd.Series(signal, index=df.index).rolling(self.smoothing_window).mean()
+        # Smoothing
+        smoothed = (
+            pd.Series(signal, index=df.index)
+            .rolling(self.smoothing_window)
+            .mean()
+        )
 
-        # class or raw output
+        # Output type
         if self.output_type == "class":
-            final_signal = np.where(smoothed > 0.1, 1,
-                           np.where(smoothed < -0.1, -1, 0))
+            final_signal = np.where(
+                smoothed > 0.1, 1,
+                np.where(smoothed < -0.1, -1, 0)
+            )
         else:
             final_signal = smoothed
 
         df["signal_sentiment"] = final_signal
         return df
+
+    # ---------------------------------------------------------
+    # Compatibility with EnsembleModel
+    # ---------------------------------------------------------
+
+    def predict(self, df):
+        """Wrapper for ensemble compatibility."""
+        return self.apply(df)
