@@ -1,27 +1,28 @@
-# configs/config_ensemble.yaml
-# Configuration file exclusively for the statistical + ML ensemble (non-RL)
-# Fully compatible with your existing structure and development workflow (Spyder)
-# Updated: November 15, 2025
+# ===================================================================
+# ENSEMBLE CONFIGURATION (Statistical + ML, non-RL)
+# Used for backtesting and signal generation.
+# Updated: November 17, 2025 (XGBoost Enabled)
+# ===================================================================
 
 # ===================================================================
 # GENERAL SETTINGS
 # ===================================================================
-verbose: 1                              # 0 = silent, 1 = normal, 2 = debug (shows INFO + DEBUG logs)
-stock_symbol: "NVDA"                    # Current king of sentiment-driven moves
+verbose: 1                                   # 0 = silent, 1 = normal, 2 = debug
+# stock_symbol: "NVDA"
 # stock_symbol: "TSLA"
-# stock_symbol: "AAPL"
+stock_symbol: "AAPL"
 # stock_symbol: "META"
 
-data_interval: "1h"                     # "1d", "1h", "30m", "15m", "5m", "1m"
+data_interval: "1h"                          # Data frequency: "1d", "1h", "30m", "15m", "5m", "1m"
 start_date: "2023-12-01"
 end_date: "2025-11-15"
 
-initial_balance: 1000000                # Starting capital for backtest
-commission_bps: 1.5                     # Realistic intraday commission (1.5 bps)
-slippage_bps: 2.0                       # Conservative slippage
+initial_balance: 1000000                     # Starting capital for backtest
+commission_bps: 1.5                          # Commission in basis points (e.g., 1.5bps = 0.00015)
+slippage_bps: 2.0                            # Slippage in basis points
 
 # ===================================================================
-# PATHS (same structure as your RL config)
+# PATHS (Matching RL structure)
 # ===================================================================
 paths:
   raw_dir: "data/raw"
@@ -31,11 +32,11 @@ paths:
   results_dir: "results"
 
 # ===================================================================
-# DATA & SENTIMENT
+# SENTIMENT SETTINGS
 # ===================================================================
 sentiment:
   enabled: true
-  mode: "combined"                      # "combined" or "individual"
+  mode: "combined"                           # "combined" or "individual" sources
   sources:
     - finnhub
     - alphavantage
@@ -43,145 +44,153 @@ sentiment:
     - yahoo
     - googlenews
     - gdelt
-  model: "ProsusAI/finbert"
-  force_refresh: false
+  model: "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis" # The Hugging Face model to use
+  force_refresh: false                       # Re-download and process sentiment data
+
+# ---------------------------------------------------------------
+# GLOBAL POSITION SCALING
+# ---------------------------------------------------------------
+position_scaling: 1.0
 
 # ===================================================================
-# ENSEMBLE MODELS (6 proven components)
+# ENSEMBLE MODELS
 # ===================================================================
 ensemble:
+  max_exposure_abs: 1.0                      # Maximum absolute exposure (1.0 = 100% of capital)
+    # ---------------------------------------------------------------
+    # MOMENTUM FACTOR – DISABLED
+    # ---------------------------------------------------------------
   momentum:
-    enabled: true
-    lookback_bars: 20  # Moskowitz et al. (2012) optimal window
-    vol_lookback_bars: 20
+    enabled: false                           # Kept disabled as it introduced noise/bias
+    lookback_bars: 48
+    vol_lookback_bars: 96
     use_log_returns: true
-    target_vol: 0.02
+    target_vol: 0.20
     max_exposure: 1.0
-    smoothing_alpha: 0.12
+    smoothing_alpha: 0.10
     min_abs_mom: 0.0
     fillna_method: ffill
     return_raw: true
 
+  # ---------------------------------------------------------------
+  # VOLATILITY TARGETING
+  # ---------------------------------------------------------------
   volatility_targeting:
-    enabled: true
-    target_vol: 0.20                    # 20% annualized (standard in intraday quant)
-    max_leverage: 3.0
-    vol_lookback_bars: 20
-    min_vol: 1e-4
-    max_scale: 4.0
-    return_raw: true
+      enabled: true                          # Controls position sizing based on realized volatility
+      target_vol: 0.20                       # Target annual volatility
+      max_leverage: 2.0
+      vol_lookback_bars: 60
+      min_vol: 1e-4
+      max_scale: 2.0
+      return_raw: false
 
+  # ---------------------------------------------------------------
+  # XGBOOST MODEL - NOW ENABLED AS SENTIMENT FILTER
+  # ---------------------------------------------------------------
   xgboost:
-      enabled: false
-      model_path: "models/xgb_ensemble.joblib"
-      retrain: false
-    
-      # Target horizon
-      prediction_horizon_hours: 8       # lookahead
-    
-      # Feature engineering
-      n_lags: 5                         # how many lagged features to include
-      use_rolling_features: true        # SMA, EMA, RSI, volatility, etc.
-      dropna: true
-    
-      # Time-series CV
-      cv_splits: 3
-      test_size_ratio: 0.2              # last 20% of data for validation
-    
-      # XGBoost parameters (essential)
-      params:
-        n_estimators: 300
-        max_depth: 4
-        learning_rate: 0.05
-        subsample: 0.8
-        colsample_bytree: 0.8
-        min_child_weight: 3
-        objective: "binary:logistic"
-        eval_metric: "logloss"
-        reg_lambda: 1.0
-        reg_alpha: 0.0
-    
-      # Early stopping
-      early_stopping_rounds: 30
-      eval_set_fraction: 0.1             # last 10% of training used for validation
-    
-      # Output signal options
-      threshold: 0.5                     # classification threshold
-      output_type: "class"               # "class" or "proba"
+    enabled: true                            # Set to TRUE to enable training and signal generation
+    model_path: "models/xgb_ensemble.joblib"
+    retrain: true                            # MUST BE TRUE for the initial training run.
 
+    prediction_horizon_hours: 8              # Target: Price move in the next 8 hours
+
+    # Feature engineering parameters
+    n_lags: 5
+    use_rolling_features: true
+    dropna: true
+
+    # Time-series Cross-Validation settings
+    cv_splits: 3
+    test_size_ratio: 0.2
+
+    # XGBoost Hyperparameters
+    params:
+      n_estimators: 300
+      max_depth: 4
+      learning_rate: 0.05
+      subsample: 0.8
+      colsample_bytree: 0.8
+      min_child_weight: 3
+      objective: "binary:logistic"
+      eval_metric: "logloss"
+      reg_lambda: 1.0
+      reg_alpha: 0.0
+
+    early_stopping_rounds: 30
+    eval_set_fraction: 0.1
+
+    threshold: 0.5
+    output_type: "class"  # Output 1 or 0 (Buy/No Buy)
+    # output_type: "proba"
+
+  # ---------------------------------------------------------------
+  # LSTM MODEL (Disabled for now)
+  # ---------------------------------------------------------------
   lstm:
-      enabled: false
+      enabled: true                 # <── ACTIVADO
       model_path: "models/lstm_ensemble.pth"
-      retrain: false
-    
-      # Sequence length (in bars, not days)
+      retrain: true                 # Primera vez sí, luego puedes poner false
       sequence_length: 60
-    
-      # Model architecture
-      input_size: 16       # auto-inferred if you want
+      input_size: 16                # número aproximado de features que genera generate_features()
       hidden_size: 64
       num_layers: 2
       dropout: 0.2
-    
-      # Training settings
       epochs: 20
       batch_size: 32
       learning_rate: 0.001
-    
-      # Target horizon
       prediction_horizon_hours: 8
-    
-      # Normalization
       normalize: true
-    
-      # Output
-      output_type: "class"     # "class" or "proba"
+      output_type: "class"          # <── IGUAL QUE XGBOOST → 0 o 1 (funciona perfecto así)
       threshold: 0.5
 
+  # ---------------------------------------------------------------
+  # SENTIMENT SIGNAL (Core signal generator)
+  # ---------------------------------------------------------------
   sentiment_signal:
-      enabled: true
-    
-      # Thresholds for classification
-      pos_threshold: 0.35
-      neg_threshold: -0.25
-    
-      # Averaging and smoothing
-      smoothing_window: 3
-    
-      # Output mode
-      output_type: "class"     # "class" or "raw"
-    
-      # Scaling options (useful if sentiment = [-1,1] or [0,1])
-      scale_min: -1.0
-      scale_max: 1.0
-      normalize: false
+    enabled: true
+    pos_threshold: 0.05
+    neg_threshold: -0.3
+    smoothing_window: 1
+    output_type: "raw"                       # Outputs a value between 0.0 and 1.0 based on sentiment
+    scale_min: -1.0
+    scale_max: 1.0
+    normalize: false
+    signal_scaling: 1.0                      # Initial signal scaling factor
 
+  # ---------------------------------------------------------------
+  # RL-STYLE RISK OVERLAY (Drawdown Control)
+  # ---------------------------------------------------------------
   rl_risk_overlay:
-      enabled: true
+    enabled: true
     
-      # Drawdown thresholds
-      drawdown_reduce_level: -0.08   # reduce exposure
-      drawdown_flat_level: -0.15     # exposure = 0
-    
-      # Sharpe-based boost
-      sharpe_boost_threshold: 1.2
-      sharpe_lookback_days: 60
-    
-      # Limits
-      max_boost: 1.3
-      reduce_factor: 0.5
-    
-      # Debugging
-      store_multiplier: true
+    # NEW PARAMETER: Annualization factor for 1h data (approx. trading hours in a year)
+    periods_per_year: 2016 
 
+    # Drawdown-based reduction (INCREASED TOLERANCE)
+    drawdown_reduce_level: -0.15             # Start reducing exposure if Drawdown hits 15%
+    drawdown_flat_level: -0.25               # Shut down completely if Drawdown hits 25%
+
+    # Sharpe-based boost 
+    sharpe_boost_threshold: 0.7              # Boost exposure if Sharpe is above this threshold
+    sharpe_lookback_days: 30                 
+
+    # Scaling adjustments
+    max_boost: 1.5                           # Maximum multiplier when performance is good
+    reduce_factor: 0.35                      # Rate of reduction when Drawdown levels are breached
+
+    store_multiplier: true                   # Store the calculated risk multiplier in the results
+
+  # ---------------------------------------------------------------
+  # WEIGHTING LOGIC
+  # ---------------------------------------------------------------
   weighting:
-    equal_risk: true                    # All signals contribute equally to risk
-    min_position_threshold: 0.05        # Below 5% → flat (reduces noise)
+    equal_risk: true                         # Use equal risk weighting across all enabled models
+    min_position_threshold: 0.0              # Minimum required signal/position magnitude to open a trade
 
 # ===================================================================
-# LOGGING & DEBUG
+# LOGGING
 # ===================================================================
 logging:
-  level: "INFO"                         # Will be overridden by verbose flag
+  level: "INFO"
   show_progress_bars: true
   debug_features: false
