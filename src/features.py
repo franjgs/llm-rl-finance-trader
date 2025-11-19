@@ -68,19 +68,15 @@ def add_vol_features(df: pd.DataFrame) -> pd.DataFrame:
     df["vol_60"] = ret.rolling(60).std()
 
     # Parkinson volatility
-    df["vol_parkinson"] = np.sqrt(
-        (1.0 / (4 * np.log(2))) *
-        (np.log(high / low) ** 2).rolling(20).mean()
-    )
+    log_hl = np.log(high / low.replace(0, np.nan))
+    parkinson_inner = (1.0 / (4 * np.log(2))) * (log_hl ** 2).rolling(20).mean()
+    df["vol_parkinson"] = np.sqrt(parkinson_inner.clip(lower=0.0))
 
     # Garman–Klass volatility
-    hl_term = (np.log(high / low)) ** 2
+    hl_term = (np.log(high / low.replace(0, np.nan))) ** 2
     oc_term = (np.log(close / close.shift(1))) ** 2
-
-    df["vol_gk"] = np.sqrt(
-        0.5 * hl_term.rolling(20).mean() -
-        (2 * np.log(2) - 1) * oc_term.rolling(20).mean()
-    )
+    gk_inner = 0.5 * hl_term.rolling(20).mean() - (2 * np.log(2) - 1) * oc_term.rolling(20).mean()
+    df["vol_gk"] = np.sqrt(gk_inner.clip(lower=0.0))
 
     return df
 

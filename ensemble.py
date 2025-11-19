@@ -296,6 +296,7 @@ logger.info("="*60)
 # ----------------------------- #
 try:
     plot_results(
+        df=final_df.reset_index(),
         symbol=symbol,
         net_worth_with_mean=strategy_equity,
         buy_and_hold=bh_equity,

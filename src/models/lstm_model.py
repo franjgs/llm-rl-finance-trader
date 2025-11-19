@@ -180,7 +180,12 @@ class LSTMPredictor:
 
         # load weights (safe)
         try:
-            state = torch.load(self.model_path, map_location=self.device)
+            state = torch.load(
+                self.model_path,
+                map_location=self.device,
+                weights_only=True
+            )
+            
             model.load_state_dict(state)
         except Exception as e:
             logger.warning(f"[LSTM] Could not load model at {self.model_path}: {e}. Returning zeros.")

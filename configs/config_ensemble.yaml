@@ -8,10 +8,11 @@
 # GENERAL SETTINGS
 # ===================================================================
 verbose: 1                                   # 0 = silent, 1 = normal, 2 = debug
-# stock_symbol: "NVDA"
+stock_symbol: "NVDA"
 # stock_symbol: "TSLA"
-stock_symbol: "AAPL"
+# stock_symbol: "AAPL"
 # stock_symbol: "META"
+# stock_symbol: "SPY"
 
 data_interval: "1h"                          # Data frequency: "1d", "1h", "30m", "15m", "5m", "1m"
 start_date: "2023-12-01"
@@ -61,7 +62,7 @@ ensemble:
     # MOMENTUM FACTOR – DISABLED
     # ---------------------------------------------------------------
   momentum:
-    enabled: false                           # Kept disabled as it introduced noise/bias
+    enabled: true                           # Kept disabled as it introduced noise/bias
     lookback_bars: 48
     vol_lookback_bars: 96
     use_log_returns: true

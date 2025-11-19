@@ -172,12 +172,12 @@ def fetch_stock_data(symbol, start_date, end_date, interval, cfg):
 # 5. Execution
 # --------------------------------------------------------------------- #
 parser = argparse.ArgumentParser()
-parser.add_argument("--config", default="configs/config.yaml")
+parser.add_argument("--config", default="configs/config_ensemble.yaml")
 args = parser.parse_args()  # ← ¡AHORA SÍ!
 
 cfg = load_config(args.config)
 symbol = cfg["stock_symbol"]
-raw_dir = cfg["raw_dir"]
+raw_dir = cfg["paths"]["raw_dir"]
 # Nuevo: Leer el intervalo desde la configuración, por defecto '1d'
 interval = cfg.get("data_interval", "1d")
 
