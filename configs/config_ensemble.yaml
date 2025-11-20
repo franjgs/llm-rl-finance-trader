@@ -53,6 +53,25 @@ sentiment:
 # ---------------------------------------------------------------
 position_scaling: 1.0
 
+# ---------------------------------------------------------------
+# FEATURE MANAGEMENT
+# ---------------------------------------------------------------
+
+# — RESEARCH MODE: allows future-looking features —
+# Use ONLY for quick feature discovery and debugging
+# NEVER use for walk-forward or live trading
+feature_mode: strict        # ← "strict" | "research" | "production"
+                            # strict: 100% leakage-free
+                            # research: ret_8h_fwd, vol_8h_fwd, etc. are added
+features:
+  block_features:           # extra safety net — remove even if they slip in
+    # - ret_8h_fwd
+    # - vol_8h_fwd
+    # - range_8h_fwd
+    # - high_8h_fwd
+    # - low_8h_fwd
+  
+  
 # ===================================================================
 # ENSEMBLE MODELS
 # ===================================================================
@@ -187,6 +206,11 @@ ensemble:
   weighting:
     equal_risk: true                         # Use equal risk weighting across all enabled models
     min_position_threshold: 0.0              # Minimum required signal/position magnitude to open a trade
+    custom_weights:
+      signal_momentum: 0.4
+      signal_xgboost: 0.3
+      signal_lstm: 0.2
+      signal_sentiment: 0.1
 
 # ===================================================================
 # LOGGING
