@@ -8,9 +8,9 @@
 # GENERAL SETTINGS
 # ===================================================================
 verbose: 1                                   # 0 = silent, 1 = normal, 2 = debug
-stock_symbol: "NVDA"
+# stock_symbol: "NVDA"
 # stock_symbol: "TSLA"
-# stock_symbol: "AAPL"
+stock_symbol: "AAPL"
 # stock_symbol: "META"
 # stock_symbol: "SPY"
 

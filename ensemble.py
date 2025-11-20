@@ -161,28 +161,33 @@ bh_equity = (final_df["close"] / final_df["close"].iloc[0]) * initial_cap
 # ----------------------------- #
 sr = sharpe_ratio(final_df["strategy_ret_net"])
 
-# Safe annualized return (handles both int and datetime index)
+# Safe annualized return (handles int or datetime index)
 if isinstance(strategy_equity.index, pd.DatetimeIndex):
     days = (strategy_equity.index[-1] - strategy_equity.index[0]).days
 else:
-    days = len(strategy_equity) - 1  # fallback: assume daily bars
-years = max(days / 365.25, 1e-6)  # avoid division by zero
+    days = len(strategy_equity) - 1
+years = max(days / 365.25, 1e-6)
 cagr = (strategy_equity.iloc[-1] / strategy_equity.iloc[0]) ** (1 / years) - 1
 
 mdd = max_drawdown(strategy_equity)
 outperf = (strategy_equity.iloc[-1] / bh_equity.iloc[-1] - 1) * 100
 
-logger.info("="*60)
+logger.info("=" * 90)
 logger.info("ENSEMBLE BACKTEST RESULTS")
-logger.info("="*60)
+logger.info("=" * 90)
+logger.info(f"Ticker         : {symbol}")
+logger.info(f"Interval       : {interval}")
+logger.info(f"Period         : {start_date} → {end_date}")
+logger.info(f"Initial Capital: ${initial_cap:,.0f}")
+logger.info("-" * 90)
 logger.info(f"Final Equity      : ${strategy_equity.iloc[-1]:,.0f}")
-logger.info(f"Buy & Hold        : ${bh_equity.iloc[-1]:,.0f}")
-logger.info(f"Total Return      : {(strategy_equity.iloc[-1]/initial_cap-1)*100:+.2f}%")
+logger.info(f"Buy & Hold Equity : ${bh_equity.iloc[-1]:,.0f}")
+logger.info(f"Total Return      : {(strategy_equity.iloc[-1]/initial_cap - 1)*100:+.2f}%")
 logger.info(f"CAGR              : {cagr*100:+.2f}%")
 logger.info(f"Sharpe Ratio      : {sr:.3f}")
 logger.info(f"Max Drawdown      : {mdd*100:.2f}%")
 logger.info(f"Outperformance    : {outperf:+.2f}% vs B&H")
-logger.info("="*60)
+logger.info("=" * 90)
 
 # ----------------------------- #
 # 9) Plot
