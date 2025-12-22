@@ -1,246 +1,291 @@
+# train_model.py
+"""
+Simple Reinforcement Learning (RL) trading script for educational purposes.
+
+What this script does (in simple terms):
+1. Loads historical stock data (prices + optional sentiment from news).
+2. Trains two PPO agents:
+   - One that uses price data + sentiment
+   - One that uses only price data
+3. Simulates trading day-by-day with both agents on the same data.
+4. Calculates the Sharpe Ratio (risk-adjusted return).
+5. Plots:
+   - Stock price + buy/sell signals (with sentiment agent)
+   - Portfolio net worth for both agents
+6. Saves results as CSV and PNG.
+
+- Code is linear and easy to follow in Spyder (all variables visible).
+- Compares "with sentiment" vs "without sentiment".
+- No complex features – focus on understanding RL basics.
+"""
+
 import argparse
 import yaml
 import pandas as pd
 import logging
 import torch
 import matplotlib.pyplot as plt
-from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
-from src.trading_env import TradingEnv
 import os
 import numpy as np
 from collections import Counter
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_util import make_vec_env
+
+from src.trading_env import TradingEnv
+
+# --------------------------------------------------------------------- #
+# Logging configuration (shows info in console)
+# --------------------------------------------------------------------- #
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-def load_config(config_path):
-    """Load configuration from a YAML file.
+# --------------------------------------------------------------------- #
+# Helper functions
+# --------------------------------------------------------------------- #
+def load_config(config_path: str) -> dict:
+    """
+    Load experiment configuration from a YAML file.
 
     Args:
-        config_path (str): Path to the YAML configuration file.
+        config_path: Path to the YAML file (e.g., configs/config.yaml).
 
     Returns:
-        dict: Parsed configuration.
-
-    Raises:
-        yaml.YAMLError: If the YAML file is invalid.
-        Exception: For other file loading errors.
+        Dictionary with all configuration parameters.
     """
     try:
-        with open(config_path, 'r') as f:
-            content = f.read()
-            logger.info(f"YAML content:\n{content}")
-            return yaml.safe_load(content)
-    except yaml.YAMLError as e:
-        logger.error(f"YAML parsing error in {config_path}: {e}")
-        raise
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        logger.info(f"Configuration loaded from {config_path}")
+        return config
     except Exception as e:
-        logger.error(f"Error loading config {config_path}: {e}")
+        logger.error(f"Failed to load config {config_path}: {e}")
         raise
 
-def calculate_sharpe_ratio(net_worth):
-    """Calculate the Sharpe Ratio for a given net worth time series.
+def calculate_sharpe_ratio(net_worth: np.ndarray) -> float:
+    """
+    Calculate the annualized Sharpe Ratio (risk-free rate = 0).
+
+    The Sharpe Ratio measures return per unit of risk.
+    Higher = better (more profit with less volatility).
 
     Args:
-        net_worth (list or np.ndarray): Time series of portfolio net worth.
+        net_worth: Array of portfolio values over time.
 
     Returns:
-        float: Annualized Sharpe Ratio (assuming zero risk-free rate).
+        Sharpe Ratio (float). Returns 0.0 if not enough data or zero volatility.
     """
     if len(net_worth) < 2:
-        logger.warning("Net worth series too short to calculate Sharpe Ratio")
+        logger.warning("Not enough data to calculate Sharpe Ratio")
         return 0.0
+
     returns = np.diff(net_worth) / net_worth[:-1]  # Daily returns
-    mean_return = np.mean(returns)
-    std_return = np.std(returns)
-    if std_return == 0:
-        logger.warning("Zero volatility in returns, Sharpe Ratio undefined")
+    if np.std(returns) == 0:
+        logger.warning("Zero volatility → Sharpe Ratio undefined")
         return 0.0
-    sharpe_ratio = mean_return / std_return * np.sqrt(252)  # Annualized
-    return sharpe_ratio
 
-def plot_results(df, net_worth_with_sentiment, actions_with_sentiment, net_worth_without_sentiment, actions_without_sentiment, sharpe_with_sentiment, sharpe_without_sentiment):
-    """Generate and save plots for stock prices, trading actions, and portfolio net worth with/without sentiment.
+    sharpe = np.mean(returns) / np.std(returns) * np.sqrt(252)  # 252 trading days/year
+    return float(sharpe)
 
-    Args:
-        df (pd.DataFrame): DataFrame with stock data (index as Date, close, etc.).
-        net_worth_with_sentiment (pd.Series): Portfolio net worth with sentiment.
-        actions_with_sentiment (pd.Series): Trading actions with sentiment (0: hold, 1: buy, 2: sell).
-        net_worth_without_sentiment (pd.Series): Portfolio net worth without sentiment.
-        actions_without_sentiment (pd.Series): Trading actions without sentiment.
-        sharpe_with_sentiment (float): Sharpe Ratio for strategy with sentiment.
-        sharpe_without_sentiment (float): Sharpe Ratio for strategy without sentiment.
+def plot_results(
+    df: pd.DataFrame,
+    net_worth_with: pd.Series,
+    actions_with: pd.Series,
+    net_worth_without: pd.Series,
+    actions_without: pd.Series,
+    sharpe_with: float,
+    sharpe_without: float,
+    symbol: str,
+) -> None:
+    """
+    Create two plots:
+    1. Stock price + buy/sell signals (only with sentiment agent)
+    2. Net worth comparison for both agents
+
+    Saves the figure to results/ and shows it (Spyder compatible).
     """
     plt.clf()
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-    
-    # Plot stock prices and trading actions (with sentiment)
-    ax1.plot(df.index, df['close'], label='Close Price', color='blue')
-    ax1.set_title('AAPL Close Price and Trading Actions (With Sentiment)')
-    ax1.set_xlabel('Date')
-    ax1.set_ylabel('Price ($)')
-    
-    buy_points = df[actions_with_sentiment == 1]
-    sell_points = df[actions_with_sentiment == 2]
-    ax1.scatter(buy_points.index, buy_points['close'], color='green', marker='^', label='Buy (With Sentiment)')
-    ax1.scatter(sell_points.index, sell_points['close'], color='red', marker='v', label='Sell (With Sentiment)')
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
+
+    # --- Plot 1: Price + Actions (with sentiment) ---
+    ax1.plot(df.index, df["close"], label="Close Price", color="steelblue", linewidth=1.5)
+    ax1.set_title(f"{symbol} Price and Trading Signals (With Sentiment)")
+    ax1.set_ylabel("Price ($)")
+    ax1.grid(True, alpha=0.3)
+
+    # Buy/Sell markers
+    buy_dates = df.index[actions_with == 1]
+    sell_dates = df.index[actions_with == 2]
+    ax1.scatter(buy_dates, df.loc[buy_dates, "close"], marker="^", color="green", s=80, label="Buy")
+    ax1.scatter(sell_dates, df.loc[sell_dates, "close"], marker="v", color="red", s=80, label="Sell")
     ax1.legend()
-    
-    # Plot portfolio net worth with Sharpe Ratios in legend
-    ax2.plot(df.index, net_worth_with_sentiment, label=f'Net Worth (With Sentiment, Sharpe: {sharpe_with_sentiment:.2f})', color='purple')
-    ax2.plot(df.index, net_worth_without_sentiment, label=f'Net Worth (Without Sentiment, Sharpe: {sharpe_without_sentiment:.2f})', color='orange', linestyle='--')
-    ax2.set_title('Portfolio Net Worth Comparison')
-    ax2.set_xlabel('Date')
-    ax2.set_ylabel('Net Worth ($)')
-    min_net_worth = min(net_worth_with_sentiment.min(), net_worth_without_sentiment.min())
-    max_net_worth = max(net_worth_with_sentiment.max(), net_worth_without_sentiment.max())
-    if np.std(net_worth_with_sentiment) < 1e-6 and np.std(net_worth_without_sentiment) < 1e-6:
-        ax2.set_ylim(min_net_worth - 100, max_net_worth + 100)
-    else:
-        ax2.set_ylim(min_net_worth * 0.95, max_net_worth * 1.05)
+
+    # --- Plot 2: Net Worth comparison ---
+    ax2.plot(df.index, net_worth_with,
+             label=f"With Sentiment (Sharpe: {sharpe_with:.2f})", color="purple", linewidth=2)
+    ax2.plot(df.index, net_worth_without,
+             label=f"Without Sentiment (Sharpe: {sharpe_without:.2f})", color="orange", linestyle="--", linewidth=2)
+    ax2.set_title("Portfolio Net Worth Comparison")
+    ax2.set_xlabel("Date")
+    ax2.set_ylabel("Net Worth ($)")
+    ax2.grid(True, alpha=0.3)
     ax2.legend()
-    logger.info(f"Net Worth (With Sentiment): min={net_worth_with_sentiment.min()}, max={net_worth_with_sentiment.max()}")
-    logger.info(f"Net Worth (Without Sentiment): min={net_worth_without_sentiment.min()}, max={net_worth_without_sentiment.max()}")
 
     plt.tight_layout()
-    plt.show()
-    os.makedirs("results", exist_ok=True)
-    plt.savefig('results/aapl_trading_results_comparison.png')
-    plt.close(fig)
-    logger.info("Saved plot to results/aapl_trading_results_comparison.png")
 
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description="Train RL trading model with/without sentiment")
+    # Save and show
+    os.makedirs("results", exist_ok=True)
+    plot_path = f"results/{symbol.lower()}_trading_results_comparison.png"
+    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+    plt.show()  # Visible in Spyder
+    logger.info(f"Plot saved to {plot_path}")
+
+# --------------------------------------------------------------------- #
+# Argument parsing
+# --------------------------------------------------------------------- #
+parser = argparse.ArgumentParser(description="Train simple RL trading agents")
 parser.add_argument("--config", default="configs/config.yaml", help="Path to config file")
 args = parser.parse_args()
 
+# --------------------------------------------------------------------- #
 # Load configuration
+# --------------------------------------------------------------------- #
 config = load_config(args.config)
-logger.info(f"Loaded config: {config}")
 
-# Load data and convert Date to datetime
-df = pd.read_csv(config['data_path'])
-df['Date'] = pd.to_datetime(df['Date'])
-df.set_index('Date', inplace=True)  # Set Date as index
-logger.info(f"Loaded data from {config['data_path']} with {len(df)} rows")
-logger.info(f"Data date range: {df.index.min()} to {df.index.max()}")
+symbol = config["stock_symbol"]
+initial_balance = config.get("initial_balance", 10000)
 
-# Initialize environments
-env_with_sentiment = lambda: TradingEnv(df, use_sentiment=True)
-vec_env_with_sentiment = make_vec_env(env_with_sentiment, n_envs=1)
-env_without_sentiment = lambda: TradingEnv(df, use_sentiment=False)
-vec_env_without_sentiment = make_vec_env(env_without_sentiment, n_envs=1)
-logger.info("Environments initialized")
+# --------------------------------------------------------------------- #
+# Load and filter data
+# --------------------------------------------------------------------- #
+raw_csv = os.path.join(config["raw_dir"], f"{symbol}_raw.csv")
+processed_csv = os.path.join(config["processed_dir"], f"{symbol}_sentiment_{config.get('sentiment_source', 'finnhub')}.csv")
+data_path = processed_csv if os.path.exists(processed_csv) else raw_csv
+logger.info(f"Loading data from {data_path}")
 
-# Set device (MPS or CPU)
+df = pd.read_csv(data_path)
+df["Date"] = pd.to_datetime(df["Date"])
+df = df[(df["Date"] >= config["start_date"]) & (df["Date"] <= config["end_date"])].copy()
+df = df.sort_values("Date").reset_index(drop=True)
+df.set_index("Date", inplace=True)
+
+logger.info(f"Data loaded: {len(df)} trading days ({df.index[0].date()} → {df.index[-1].date()})")
+
+# --------------------------------------------------------------------- #
+# Create environments
+# --------------------------------------------------------------------- #
+env_with = lambda: TradingEnv(df, use_sentiment=True, initial_balance=initial_balance)
+env_without = lambda: TradingEnv(df, use_sentiment=False, initial_balance=initial_balance)
+
+vec_env_with = make_vec_env(env_with, n_envs=1)
+vec_env_without = make_vec_env(env_without, n_envs=1)
+
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 logger.info(f"Using device: {device}")
 
-# Train PPO model with sentiment
-model_with_sentiment = PPO("MlpPolicy", vec_env_with_sentiment, verbose=1, device=device, learning_rate=0.0001, clip_range=0.1)
-logger.info(f"Training PPO with sentiment for {config['timesteps']} timesteps")
-model_with_sentiment.learn(total_timesteps=config['timesteps'])
-model_with_sentiment.save("models/trading_model_with_sentiment")
-logger.info("Model with sentiment saved to models/trading_model_with_sentiment")
+# --------------------------------------------------------------------- #
+# Train PPO agents
+# --------------------------------------------------------------------- #
+ppo_kwargs = {
+    "learning_rate": config.get("ppo_lr", 0.0003),
+    "n_steps": config.get("ppo_n_steps", 2048),
+    "batch_size": config.get("ppo_batch_size", 64),
+    "gamma": config.get("ppo_gamma", 0.99),
+    "gae_lambda": config.get("ppo_gae_lambda", 0.95),
+    "clip_range": config.get("ppo_clip_range", 0.2),
+    "ent_coef": 0.01,
+    "verbose": 1,
+    "device": device,
+}
 
-# Train PPO model without sentiment
-model_without_sentiment = PPO("MlpPolicy", vec_env_without_sentiment, verbose=1, device=device, learning_rate=0.0001, clip_range=0.1)
-logger.info(f"Training PPO without sentiment for {config['timesteps']} timesteps")
-model_without_sentiment.learn(total_timesteps=config['timesteps'])
-model_without_sentiment.save("models/trading_model_without_sentiment")
-logger.info("Model without sentiment saved to models/trading_model_without_sentiment")
+logger.info("Training agent WITH sentiment...")
+model_with = PPO("MlpPolicy", vec_env_with, **ppo_kwargs)
+model_with.learn(total_timesteps=config["timesteps"])
+model_with.save("models/trading_model_with_sentiment")
 
-# Initialize simulation DataFrames with Date as index
-simulation_df_with_sentiment = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
-simulation_df_without_sentiment = pd.DataFrame(index=df.index, columns=['net_worth', 'action'])
+logger.info("Training agent WITHOUT sentiment...")
+model_without = PPO("MlpPolicy", vec_env_without, **ppo_kwargs)
+model_without.learn(total_timesteps=config["timesteps"])
+model_without.save("models/trading_model_without_sentiment")
 
-# Simulate trading (with sentiment)
-env = TradingEnv(df, use_sentiment=True)
-obs = env.reset()[0]
-for step in range(len(df)):
-    action, _ = model_with_sentiment.predict(obs)
-    action = action.item()
-    obs, reward, done, truncated, info = env.step(action)
-    current_price = df.iloc[step]['close']
-    net_worth_value = env.balance + env.shares_held * current_price
-    date = df.index[step]
-    simulation_df_with_sentiment.loc[date, 'net_worth'] = net_worth_value
-    simulation_df_with_sentiment.loc[date, 'action'] = action
-    logger.debug(f"Step {step} (with sentiment): action={action}, balance={env.balance}, shares_held={env.shares_held}, net_worth={net_worth_value}, date={date}")
-    if done or truncated:
-        missing_dates = df.index[step + 1:].tolist()
-        logger.warning(f"Simulation (with sentiment) stopped early at step {step}, date={date}. Missing dates: {missing_dates}")
-        # Fill remaining rows with last values
-        last_net_worth = net_worth_value
-        last_action = 0  # Hold
-        for missing_date in missing_dates:
-            simulation_df_with_sentiment.loc[missing_date, 'net_worth'] = last_net_worth
-            simulation_df_with_sentiment.loc[missing_date, 'action'] = last_action
-        break
+# --------------------------------------------------------------------- #
+# Simulation (run agents on data)
+# --------------------------------------------------------------------- #
+simulation_with = pd.DataFrame(index=df.index, columns=["net_worth", "action"])
+simulation_without = pd.DataFrame(index=df.index, columns=["net_worth", "action"])
 
-# Simulate trading (without sentiment)
-env = TradingEnv(df, use_sentiment=False)
-obs = env.reset()[0]
-for step in range(len(df)):
-    action, _ = model_without_sentiment.predict(obs)
-    action = action.item()
-    obs, reward, done, truncated, info = env.step(action)
-    current_price = df.iloc[step]['close']
-    net_worth_value = env.balance + env.shares_held * current_price
-    date = df.index[step]
-    simulation_df_without_sentiment.loc[date, 'net_worth'] = net_worth_value
-    simulation_df_without_sentiment.loc[date, 'action'] = action
-    logger.debug(f"Step {step} (without sentiment): action={action}, balance={env.balance}, shares_held={env.shares_held}, net_worth={net_worth_value}, date={date}")
-    if done or truncated:
-        missing_dates = df.index[step + 1:].tolist()
-        logger.warning(f"Simulation (without sentiment) stopped early at step {step}, date={date}. Missing dates: {missing_dates}")
-        # Fill remaining rows with last values
-        last_net_worth = net_worth_value
-        last_action = 0  # Hold
-        for missing_date in missing_dates:
-            simulation_df_without_sentiment.loc[missing_date, 'net_worth'] = last_net_worth
-            simulation_df_without_sentiment.loc[missing_date, 'action'] = last_action
-        break
+def run_simulation(model, use_sentiment: bool, sim_df: pd.DataFrame):
+    """Run one agent on the full dataset and fill sim_df."""
+    env = TradingEnv(df, use_sentiment=use_sentiment, initial_balance=initial_balance)
+    obs = env.reset()[0]
 
-# Verify alignment and data completeness
-if not simulation_df_with_sentiment.index.equals(df.index):
-    logger.error("Index misalignment in simulation_df_with_sentiment")
-    raise ValueError("Index misalignment in simulation_df_with_sentiment")
-if not simulation_df_without_sentiment.index.equals(df.index):
-    logger.error("Index misalignment in simulation_df_without_sentiment")
-    raise ValueError("Index misalignment in simulation_df_without_sentiment")
-if simulation_df_with_sentiment['net_worth'].isna().any():
-    logger.error("Missing net_worth values in simulation_df_with_sentiment")
-    raise ValueError("Missing net_worth values in simulation_df_with_sentiment")
-if simulation_df_without_sentiment['net_worth'].isna().any():
-    logger.error("Missing net_worth values in simulation_df_without_sentiment")
-    raise ValueError("Missing net_worth values in simulation_df_without_sentiment")
-logger.info("Date indices and data aligned successfully")
+    for step in range(len(df)):
+        action, _ = model.predict(obs, deterministic=True)
+        action = int(action.item())
+        obs, reward, done, truncated, info = env.step(action)
 
-# Calculate Sharpe Ratios
-sharpe_with_sentiment = calculate_sharpe_ratio(simulation_df_with_sentiment['net_worth'])
-sharpe_without_sentiment = calculate_sharpe_ratio(simulation_df_without_sentiment['net_worth'])
-logger.info(f"Sharpe Ratio (With Sentiment): {sharpe_with_sentiment:.4f}")
-logger.info(f"Sharpe Ratio (Without Sentiment): {sharpe_without_sentiment:.4f}")
+        price = df.iloc[step]["close"]
+        net_worth = env.balance + env.shares_held * price
+        date = df.index[step]
 
-# Log data lengths and actions distribution
-logger.info(f"Length of df: {len(df)}, Length of simulation_df_with_sentiment: {len(simulation_df_with_sentiment)}, Length of simulation_df_without_sentiment: {len(simulation_df_without_sentiment)}")
-logger.info(f"Actions distribution (with sentiment): {Counter(simulation_df_with_sentiment['action'])}")
-logger.info(f"Actions distribution (without sentiment): {Counter(simulation_df_without_sentiment['action'])}")
+        sim_df.loc[date, "net_worth"] = net_worth
+        sim_df.loc[date, "action"] = action
 
-# Save results
+        if done or truncated:
+            # Fill remaining days with last values (rare case)
+            for remaining_date in df.index[step + 1:]:
+                sim_df.loc[remaining_date, "net_worth"] = net_worth
+                sim_df.loc[remaining_date, "action"] = 0
+            break
+
+    return sim_df
+
+logger.info("Simulating agent WITH sentiment...")
+simulation_with = run_simulation(model_with, True, simulation_with)
+
+logger.info("Simulating agent WITHOUT sentiment...")
+simulation_without = run_simulation(model_without, False, simulation_without)
+
+# --------------------------------------------------------------------- #
+# Metrics and results
+# --------------------------------------------------------------------- #
+sharpe_with = calculate_sharpe_ratio(simulation_with["net_worth"].values)
+sharpe_without = calculate_sharpe_ratio(simulation_without["net_worth"].values)
+
+logger.info(f"Sharpe Ratio (With Sentiment): {sharpe_with:.4f}")
+logger.info(f"Sharpe Ratio (Without Sentiment): {sharpe_without:.4f}")
+
+# Save CSV
 results_df = pd.DataFrame({
-    'Date': df.index,
-    'Net_Worth_With_Sentiment': simulation_df_with_sentiment['net_worth'],
-    'Net_Worth_Without_Sentiment': simulation_df_without_sentiment['net_worth'],
-    'Actions_With_Sentiment': simulation_df_with_sentiment['action'],
-    'Actions_Without_Sentiment': simulation_df_without_sentiment['action']
+    "Date": df.index,
+    "Net_Worth_With_Sentiment": simulation_with["net_worth"],
+    "Actions_With_Sentiment": simulation_with["action"],
+    "Net_Worth_Without_Sentiment": simulation_without["net_worth"],
+    "Actions_Without_Sentiment": simulation_without["action"],
 })
-os.makedirs('results', exist_ok=True)
-results_df.to_csv('results/aapl_trading_results.csv', index=False)
-logger.info("Saved trading results to results/aapl_trading_results.csv")
+os.makedirs("results", exist_ok=True)
+results_df.to_csv(f"results/{symbol.lower()}_trading_results.csv", index=False)
+logger.info("Results saved to CSV")
 
-# Generate comparison plots
-plot_results(df, simulation_df_with_sentiment['net_worth'], simulation_df_with_sentiment['action'], simulation_df_without_sentiment['net_worth'], simulation_df_without_sentiment['action'], sharpe_with_sentiment, sharpe_without_sentiment)
+# Plot
+plot_results(
+    df,
+    simulation_with["net_worth"],
+    simulation_with["action"],
+    simulation_without["net_worth"],
+    simulation_without["action"],
+    sharpe_with,
+    sharpe_without,
+    symbol
+)
+
+# --------------------------------------------------------------------- #
+# Variables visible in Spyder
+# --------------------------------------------------------------------- #
+# df
+# model_with, model_without
+# simulation_with, simulation_without
+# sharpe_with, sharpe_without
