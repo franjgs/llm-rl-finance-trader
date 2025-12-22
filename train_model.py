@@ -105,11 +105,14 @@ def plot_results(df, net_worth_with_sentiment, actions_with_sentiment, net_worth
     logger.info(f"Net Worth (Without Sentiment): min={net_worth_without_sentiment.min()}, max={net_worth_without_sentiment.max()}")
 
     plt.tight_layout()
-    plt.show()
+
     os.makedirs("results", exist_ok=True)
-    plt.savefig('results/aapl_trading_results_comparison.png')
+    plot_path = f"results/{symbol.lower()}_trading_results_comparison.png"
+    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+    logger.info(f"Plot saved to {plot_path}")
+
+    plt.show()
     plt.close(fig)
-    logger.info("Saved plot to results/aapl_trading_results_comparison.png")
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Train RL trading model with/without sentiment")
