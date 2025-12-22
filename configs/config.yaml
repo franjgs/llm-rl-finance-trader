@@ -23,7 +23,7 @@ commission: 0.001   # 0.1 %
 start_date: "2023-11-01"
 end_date: "2025-11-11"
 
-data_interval: "1h"  # "1d" (daily), '1h' (hourly), '30m', '15m', '5m', etc.
+data_interval: "1d"  # "1d" (daily), '1h' (hourly), '30m', '15m', '5m', etc.
 
 
 # Directory paths
