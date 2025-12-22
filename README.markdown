@@ -102,9 +102,15 @@ llm-rl-finance-trader/
    Edit `configs/config.yaml`:
    ```yaml
    stock_symbol: AAPL
+   # Date range for historical data
    start_date: 2023-11-16
    end_date: 2024-11-08
-   data_path: data/processed/AAPL_sentiment.csv
+   data_interval: "1d"  # "1d" (daily), '1h' (hourly), '30m', '15m', '5m', etc.
+
+   # Initial trading capital
+   initial_balance: 10000
+   commission: 0.001   # 0.1 % 
+
    timesteps: 10000
    ```
 
