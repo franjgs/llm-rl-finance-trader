@@ -111,7 +111,7 @@ llm-rl-finance-trader/
    initial_balance: 10000
    commission: 0.001   # 0.1 % 
 
-   timesteps: 10000
+   timesteps: 20000
    ```
 
 2. **Run the Pipeline**:
